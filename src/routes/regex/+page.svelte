@@ -410,7 +410,7 @@
 									<div class="match-groups">
 										{#each Object.entries(m.namedGroups) as [name, value]}
 											<div class="group-item">
-												<span class="group-label">&lt;{name}&gt;</span>
+												<span class="group-label">$&lt;{name}&gt;</span>
 												<span class="group-value"
 													>{value !== undefined ? value : '(undefined)'}</span
 												>

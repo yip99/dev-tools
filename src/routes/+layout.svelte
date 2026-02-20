@@ -80,9 +80,6 @@
 						<line x1="8" y1="21" x2="16" y2="21" />
 						<line x1="12" y1="17" x2="12" y2="21" />
 					</svg>
-					<span class="theme-label theme-label-light">light</span>
-					<span class="theme-label theme-label-dark">dark</span>
-					<span class="theme-label theme-label-system">system</span>
 				</button>
 			</nav>
 		</div>

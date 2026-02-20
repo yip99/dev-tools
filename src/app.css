@@ -190,19 +190,15 @@ h3 {
 
 /* System: show when no attribute or explicit system */
 html:not([data-theme]) .theme-toggle .theme-icon-system,
-html:not([data-theme]) .theme-toggle .theme-label-system,
-html[data-theme='system'] .theme-toggle .theme-icon-system,
-html[data-theme='system'] .theme-toggle .theme-label-system {
+html[data-theme='system'] .theme-toggle .theme-icon-system {
     display: block;
 }
 
-html[data-theme='light'] .theme-toggle .theme-icon-light,
-html[data-theme='light'] .theme-toggle .theme-label-light {
+html[data-theme='light'] .theme-toggle .theme-icon-light {
     display: block;
 }
 
-html[data-theme='dark'] .theme-toggle .theme-icon-dark,
-html[data-theme='dark'] .theme-toggle .theme-label-dark {
+html[data-theme='dark'] .theme-toggle .theme-icon-dark {
     display: block;
 }
 

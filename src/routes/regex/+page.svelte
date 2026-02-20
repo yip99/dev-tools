@@ -432,7 +432,9 @@
 			<div class="input-group">
 				<div class="label-row">
 					<label for="replace-input">Replace with</label>
-					<span class="hint">$1 $2 groups · $&lt;name&gt; named · $& full · $$ literal $</span>
+					<span class="hint"
+						>$1 $2 groups · $&lt;name&gt; named · $& full · $$ literal $ · \n \t</span
+					>
 				</div>
 				<input
 					id="replace-input"

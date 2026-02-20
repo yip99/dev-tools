@@ -273,24 +273,4 @@ users.forEach((user) => greet(user));`;
 		font-size: 1rem;
 		line-height: 1;
 	}
-
-	/* --- Identical Box --- */
-	.identical-box {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--accent-green);
-		border-radius: 6px;
-		color: var(--accent-green);
-		font-family: var(--font-mono);
-		font-size: 0.9rem;
-		background: rgba(34, 197, 94, 0.05);
-	}
-
-	.identical-icon {
-		font-weight: bold;
-		font-size: 1.2rem;
-	}
 </style>

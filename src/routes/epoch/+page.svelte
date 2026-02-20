@@ -308,13 +308,6 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.now-label {
-		font-size: 0.85rem;
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		color: var(--gray);
-	}
-
 	.now-stamp {
 		background: none;
 		border: none;
@@ -331,11 +324,6 @@
 
 	.now-stamp:hover {
 		opacity: 0.7;
-	}
-
-	.now-unit {
-		font-size: 0.85rem;
-		color: var(--gray);
 	}
 
 	/* --- Converter Grid --- */

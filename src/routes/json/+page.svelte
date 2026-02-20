@@ -480,24 +480,4 @@
 		vertical-align: middle;
 		height: 1.15rem;
 	}
-
-	/* --- Error (JSON page only) --- */
-	.error-box {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 1rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--accent-red);
-		border-radius: 6px;
-		color: var(--accent-red);
-		font-family: var(--font-mono);
-		font-size: 0.9rem;
-		background: rgba(255, 77, 77, 0.05);
-	}
-
-	.error-icon {
-		font-weight: bold;
-		font-size: 1.2rem;
-	}
 </style>

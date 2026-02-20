@@ -1,6 +1,7 @@
 <!-- src/routes/regex/+page.svelte -->
 <script>
 	import AlertBox from '$lib/components/AlertBox.svelte';
+	import CodeEditor from '$lib/components/CodeEditor.svelte';
 
 	let pattern = $state('');
 	let testString = $state('');
@@ -18,10 +19,14 @@
 
 	let textareaEl = $state(null);
 	let backdropEl = $state(null);
+	let matchTime = $state(0);
+	let matches = $state([]);
 
 	let flags = $derived(
 		(flagG ? 'g' : '') + (flagI ? 'i' : '') + (flagM ? 'm' : '') + (flagS ? 's' : '')
 	);
+
+	let regexString = $derived(pattern ? `/${pattern}/${flags}` : '');
 
 	let regexResult = $derived.by(() => {
 		if (!pattern) return { regex: null, error: null };
@@ -32,44 +37,49 @@
 		}
 	});
 
-	let matches = $derived.by(() => {
+	$effect(() => {
 		const { regex } = regexResult;
-		if (!regex || !testString) return [];
+		if (!regex || !testString) {
+			matchTime = 0;
+			matches = [];
+			return;
+		}
 		try {
+			const start = performance.now();
 			const r = new RegExp(regex.source, regex.flags);
 			const results = [];
-			let match;
 			const limit = 1000;
+			let match;
+
 			if (r.global) {
 				let i = 0;
 				while ((match = r.exec(testString)) !== null && i < limit) {
-					results.push({
-						full: match[0],
-						index: match.index,
-						end: match.index + match[0].length,
-						groups: [...match].slice(1),
-						namedGroups: match.groups ? { ...match.groups } : null
-					});
+					results.push(toMatchEntry(match));
 					if (match[0].length === 0) r.lastIndex++;
 					i++;
 				}
 			} else {
 				match = r.exec(testString);
-				if (match) {
-					results.push({
-						full: match[0],
-						index: match.index,
-						end: match.index + match[0].length,
-						groups: [...match].slice(1),
-						namedGroups: match.groups ? { ...match.groups } : null
-					});
-				}
+				if (match) results.push(toMatchEntry(match));
 			}
-			return results;
+
+			matchTime = (performance.now() - start) * 1000;
+			matches = results;
 		} catch {
-			return [];
+			matchTime = 0;
+			matches = [];
 		}
 	});
+
+	function toMatchEntry(match) {
+		return {
+			full: match[0],
+			index: match.index,
+			end: match.index + match[0].length,
+			groups: [...match].slice(1),
+			namedGroups: match.groups ? { ...match.groups } : null
+		};
+	}
 
 	let segments = $derived.by(() => {
 		if (!matches.length || !testString) {
@@ -95,53 +105,10 @@
 		const { regex } = regexResult;
 		if (!regex || !testString) return null;
 		try {
-			return testString.replace(new RegExp(regex.source, regex.flags), replaceInput);
-		} catch {
-			return null;
-		}
-	});
-
-	let replaceSegments = $derived.by(() => {
-		if (replaceResult === null || replaceResult === testString) return null;
-		const { regex } = regexResult;
-		if (!regex) return null;
-		try {
-			const rr = new RegExp(regex.source, regex.flags);
-			const segs = [];
-			const original = testString;
-			const replaced = replaceResult;
-			const replacements = [];
-			let m;
-			if (rr.global) {
-				while ((m = rr.exec(original)) !== null) {
-					replacements.push({ index: m.index, end: m.index + m[0].length, original: m[0] });
-					if (m[0].length === 0) rr.lastIndex++;
-				}
-			} else {
-				m = rr.exec(original);
-				if (m) replacements.push({ index: m.index, end: m.index + m[0].length, original: m[0] });
-			}
-
-			let srcPos = 0;
-			let dstPos = 0;
-			for (const rep of replacements) {
-				const beforeLen = rep.index - srcPos;
-				if (beforeLen > 0) {
-					segs.push({ text: replaced.slice(dstPos, dstPos + beforeLen), type: 'plain' });
-					dstPos += beforeLen;
-				}
-				srcPos = rep.end;
-				const singleRep = rep.original.replace(
-					new RegExp(regex.source, regex.flags.replace('g', '')),
-					replaceInput
-				);
-				segs.push({ text: singleRep, type: 'replaced' });
-				dstPos += singleRep.length;
-			}
-			if (dstPos < replaced.length) {
-				segs.push({ text: replaced.slice(dstPos), type: 'plain' });
-			}
-			return segs;
+			return testString.replace(
+				new RegExp(regex.source, regex.flags),
+				unescapeString(replaceInput)
+			);
 		} catch {
 			return null;
 		}
@@ -149,20 +116,37 @@
 
 	let extractResults = $derived.by(() => {
 		if (!matches.length || !extractTemplate) return [];
+		const template = unescapeString(extractTemplate);
 		return matches.map((m) => {
-			let output = extractTemplate;
+			let output = template;
+			// Protect $$ (escaped dollar) before any substitution
+			output = output.replace(/\$\$/g, '\x00DOLLAR\x00');
 			output = output.replace(/\$&|\$0/g, m.full);
 			m.groups.forEach((g, i) => {
 				output = output.replace(new RegExp(`\\$${i + 1}`, 'g'), g ?? '');
 			});
 			if (m.namedGroups) {
 				for (const [name, value] of Object.entries(m.namedGroups)) {
-					output = output.replace(new RegExp(`\\$\\{${name}\\}`, 'g'), value ?? '');
+					output = output.replace(new RegExp(`\\$<${name}>`, 'g'), value ?? '');
 				}
 			}
+			// Restore escaped dollars
+			output = output.replace(/\x00DOLLAR\x00/g, '$');
 			return output;
 		});
 	});
+
+	let extractOutput = $derived(extractResults.join(''));
+
+	function unescapeString(str) {
+		return str
+			.replace(/\\\\/g, '\x00ESC\x00')
+			.replace(/\\n/g, '\n')
+			.replace(/\\t/g, '\t')
+			.replace(/\\r/g, '\r')
+			.replace(/\\0/g, '\0')
+			.replace(/\x00ESC\x00/g, '\\');
+	}
 
 	const MATCH_COLORS = [
 		'rgba(251, 191, 36, 0.3)',
@@ -177,17 +161,16 @@
 
 	function syncScroll() {
 		if (backdropEl && textareaEl) {
-			backdropEl.scrollTop = textareaEl.scrollTop;
-			backdropEl.scrollLeft = textareaEl.scrollLeft;
+			backdropEl.style.transform = `translate(-${textareaEl.scrollLeft}px, -${textareaEl.scrollTop}px)`;
 		}
 	}
 
 	function loadSample() {
-		pattern = '(\\w+)@(\\w+\\.\\w+)';
+		pattern = '(?<user>\\w+)@(?<domain>\\w+\\.\\w+)';
 		testString =
 			'Contact us at hello@example.com or support@devtools.io for help.\nAlso try admin@test.org for testing.';
-		replaceInput = '[$1 at $2]';
-		extractTemplate = 'User: $1, Domain: $2';
+		replaceInput = '[$<user> at $<domain>]';
+		extractTemplate = 'User: $<user>, Domain: $<domain>';
 	}
 
 	function clear() {
@@ -225,7 +208,9 @@
 
 	<p>
 		Build and test regular expressions. Replace matches or extract capture groups with templates.
-		Use <code>$1</code>, <code>$2</code> for groups, <code>${'{name}'}</code> for named groups.
+		Use <code>$1</code>, <code>$2</code> for groups, <code>$&lt;name&gt;</code> for named groups,
+		<code>$$</code>
+		for literal <code>$</code>.
 	</p>
 
 	<!-- Pattern -->
@@ -272,6 +257,33 @@
 			/>
 			<span class="pattern-delim">/</span>
 			<span class="pattern-flags">{flags || '\u00a0'}</span>
+			{#if pattern}
+				<button
+					class="copy-regex-btn"
+					onclick={() => copyValue('regex', regexString)}
+					title="Copy regex"
+				>
+					{#if copied.regex}
+						<span class="accent-green">✓</span>
+					{:else}
+						<svg
+							xmlns="http://www.w3.org/2000/svg"
+							width="14"
+							height="14"
+							fill="none"
+							viewBox="0 0 24 24"
+							stroke="currentColor"
+							stroke-width="2"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+							/>
+						</svg>
+					{/if}
+				</button>
+			{/if}
 		</div>
 	</div>
 
@@ -298,24 +310,30 @@
 		<div class="label-row">
 			<label for="test-string">Test String</label>
 			{#if matches.length > 0}
-				<span class="match-count">{matches.length} match{matches.length === 1 ? '' : 'es'}</span>
+				<span class="match-count">
+					{matches.length} match{matches.length === 1 ? '' : 'es'} ·
+					{#if matchTime < 1000}
+						{matchTime.toFixed(3)}µs
+					{:else}
+						{(matchTime / 1000).toFixed(3)}ms
+					{/if}
+				</span>
 			{/if}
 		</div>
 		<div class="textarea-hl-wrap">
-			<div class="textarea-backdrop" bind:this={backdropEl} aria-hidden="true">
-				{#each segments as seg}{#if seg.type === 'match'}<mark
-							class="match-hl"
-							class:match-hl-hover={hoverMatch === seg.matchIndex}
-							style:background={matchColor(seg.matchIndex)}
-							onmouseenter={() => (hoverMatch = seg.matchIndex)}
-							onmouseleave={() => (hoverMatch = -1)}>{seg.text}</mark
-						>{:else}{seg.text}{/if}{/each}{#if !segments.length}{testString}{/if}
+			<div class="textarea-backdrop-clip" aria-hidden="true">
+				<div class="textarea-backdrop" bind:this={backdropEl}>
+					{#each segments as seg}{#if seg.type === 'match'}<mark
+								class="match-hl"
+								class:match-hl-hover={hoverMatch === seg.matchIndex}
+								style:background={matchColor(seg.matchIndex)}>{seg.text}</mark
+							>{:else}{seg.text}{/if}{/each}{#if !segments.length}{testString}{/if}
+				</div>
 			</div>
 			<textarea
 				id="test-string"
 				bind:this={textareaEl}
 				bind:value={testString}
-				oninput={syncScroll}
 				onscroll={syncScroll}
 				placeholder="Enter text to test against..."
 				rows="5"
@@ -392,7 +410,7 @@
 									<div class="match-groups">
 										{#each Object.entries(m.namedGroups) as [name, value]}
 											<div class="group-item">
-												<span class="group-label">${'{' + name + '}'}</span>
+												<span class="group-label">&lt;{name}&gt;</span>
 												<span class="group-value"
 													>{value !== undefined ? value : '(undefined)'}</span
 												>
@@ -414,13 +432,13 @@
 			<div class="input-group">
 				<div class="label-row">
 					<label for="replace-input">Replace with</label>
-					<span class="hint">$1, $2 for groups · $& for full match</span>
+					<span class="hint">$1 $2 groups · $&lt;name&gt; named · $& full · $$ literal $</span>
 				</div>
 				<input
 					id="replace-input"
 					type="text"
 					bind:value={replaceInput}
-					placeholder="[$1 at $2]"
+					placeholder="[$<user> at $<domain>]"
 					spellcheck="false"
 				/>
 			</div>
@@ -433,11 +451,11 @@
 							{copied.replace ? 'Copied!' : 'Copy'}
 						</button>
 					</div>
-					<div class="output-view">
-						{#if replaceSegments}{#each replaceSegments as seg}{#if seg.type === 'replaced'}<mark
-										class="replace-hl">{seg.text}</mark
-									>{:else}{seg.text}{/if}{/each}{:else}{replaceResult}{/if}
-					</div>
+					<CodeEditor
+						value={replaceResult}
+						readonly
+						rows={Math.min(replaceResult.split('\n').length + 1, 12)}
+					/>
 				</div>
 			{:else if matches.length === 0}
 				<AlertBox type="info">No matches to replace.</AlertBox>
@@ -449,13 +467,15 @@
 			<div class="input-group">
 				<div class="label-row">
 					<label for="extract-template">Template</label>
-					<span class="hint">$0 full match · $1, $2 groups · ${'{name}'} named</span>
+					<span class="hint"
+						>$0 full · $1 $2 groups · $&lt;name&gt; named · $$ literal $ · \n \t</span
+					>
 				</div>
 				<input
 					id="extract-template"
 					type="text"
 					bind:value={extractTemplate}
-					placeholder="User: $1, Domain: $2"
+					placeholder="$<user>\n"
 					spellcheck="false"
 				/>
 			</div>
@@ -464,26 +484,15 @@
 				<div class="input-group">
 					<div class="label-row">
 						<label>Extracted ({extractResults.length})</label>
-						<button
-							class="copy-btn"
-							onclick={() => copyValue('extract', extractResults.join('\n'))}
-						>
-							{copied.extract ? 'Copied!' : 'Copy All'}
+						<button class="copy-btn" onclick={() => copyValue('extract', extractOutput)}>
+							{copied.extract ? 'Copied!' : 'Copy'}
 						</button>
 					</div>
-					<div class="result-card">
-						{#each extractResults as line, i}
-							<div class="result-row">
-								<span class="result-index">{i + 1}</span>
-								<div class="result-value-row">
-									<span class="result-value">{line}</span>
-									<button class="copy-btn" onclick={() => copyValue(`e${i}`, line)}>
-										{copied[`e${i}`] ? 'Copied!' : 'Copy'}
-									</button>
-								</div>
-							</div>
-						{/each}
-					</div>
+					<CodeEditor
+						value={extractOutput}
+						readonly
+						rows={Math.min(extractResults.length + 1, 12)}
+					/>
 				</div>
 			{:else if matches.length === 0}
 				<AlertBox type="info">No matches to extract from.</AlertBox>
@@ -497,7 +506,6 @@
 </article>
 
 <style>
-	/* --- Pattern Input --- */
 	.pattern-wrap {
 		display: flex;
 		align-items: center;
@@ -544,7 +552,28 @@
 		flex-shrink: 0;
 	}
 
-	/* --- Flag Toggles --- */
+	.copy-regex-btn {
+		background: none;
+		border: 1px solid var(--border);
+		color: var(--gray);
+		font-size: 1rem;
+		width: 2rem;
+		height: 2rem;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		border-radius: 4px;
+		cursor: pointer;
+		flex-shrink: 0;
+		margin-left: 0.25rem;
+		transition: all 0.15s;
+	}
+
+	.copy-regex-btn:hover {
+		border-color: var(--gray);
+		color: var(--fg);
+	}
+
 	.flag-toggles {
 		display: flex;
 		gap: 0.25rem;
@@ -578,7 +607,6 @@
 		border-color: var(--fg);
 	}
 
-	/* --- Textarea with Highlight Overlay --- */
 	.textarea-hl-wrap {
 		position: relative;
 		border: 1px solid var(--border);
@@ -591,12 +619,18 @@
 		border-color: var(--accent-gold);
 	}
 
-	.textarea-backdrop {
+	.textarea-backdrop-clip {
 		position: absolute;
 		top: 0;
 		left: 0;
 		right: 0;
 		bottom: 0;
+		overflow: hidden;
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	.textarea-backdrop {
 		padding: 0.75rem;
 		font-family: var(--font-mono);
 		font-size: 0.9rem;
@@ -604,10 +638,8 @@
 		white-space: pre-wrap;
 		word-wrap: break-word;
 		overflow-wrap: break-word;
-		overflow: auto;
 		color: transparent;
-		pointer-events: none;
-		z-index: 0;
+		will-change: transform;
 	}
 
 	.textarea-hl-wrap textarea {
@@ -650,20 +682,17 @@
 		outline-offset: 1px;
 	}
 
-	/* Allow pointer events on marks for hover interaction */
 	.textarea-backdrop mark {
 		pointer-events: auto;
 		cursor: default;
 	}
 
-	/* --- Match Count --- */
 	.match-count {
 		font-size: 0.75rem;
 		color: var(--accent-green);
 		font-family: var(--font-mono);
 	}
 
-	/* --- Mode Tabs --- */
 	.mode-tabs {
 		display: flex;
 		border: 1px solid var(--border);
@@ -719,7 +748,6 @@
 		height: 1.15rem;
 	}
 
-	/* --- Match Details --- */
 	.result-card {
 		border: 1px solid var(--border);
 		border-radius: 6px;
@@ -800,65 +828,6 @@
 		word-break: break-all;
 	}
 
-	/* --- Output View --- */
-	.output-view {
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		padding: 0.75rem;
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		line-height: 1.6;
-		white-space: pre-wrap;
-		word-break: break-word;
-		overflow-x: auto;
-		background: rgba(128, 128, 128, 0.03);
-	}
-
-	.replace-hl {
-		background: rgba(34, 197, 94, 0.25);
-		border-radius: 2px;
-		padding: 1px 0;
-		color: inherit;
-	}
-
-	/* --- Result Rows --- */
-	.result-row {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.65rem 0.75rem;
-		border-bottom: 1px solid var(--border);
-	}
-
-	.result-row:last-child {
-		border-bottom: none;
-	}
-
-	.result-index {
-		font-size: 0.7rem;
-		color: var(--gray);
-		opacity: 0.5;
-		min-width: 1.5ch;
-		text-align: right;
-		flex-shrink: 0;
-	}
-
-	.result-value-row {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 0.5rem;
-		flex: 1;
-		min-width: 0;
-	}
-
-	.result-value {
-		font-size: 0.85rem;
-		word-break: break-all;
-		line-height: 1.5;
-	}
-
-	/* --- Copy / Hint --- */
 	.copy-btn {
 		background: none;
 		border: none;

@@ -171,12 +171,14 @@ h3 {
     border-color: var(--gray);
 }
 
+/* Hide all icons and labels by default */
 .theme-toggle svg {
-    display: block;
+    display: none;
     flex-shrink: 0;
 }
 
 .theme-toggle .theme-label {
+    display: none;
     font-family: var(--font-mono);
     font-size: 0.65rem;
     text-transform: uppercase;
@@ -184,6 +186,24 @@ h3 {
     margin-left: 0.35rem;
     opacity: 0.7;
     line-height: 1;
+}
+
+/* System: show when no attribute or explicit system */
+html:not([data-theme]) .theme-toggle .theme-icon-system,
+html:not([data-theme]) .theme-toggle .theme-label-system,
+html[data-theme='system'] .theme-toggle .theme-icon-system,
+html[data-theme='system'] .theme-toggle .theme-label-system {
+    display: block;
+}
+
+html[data-theme='light'] .theme-toggle .theme-icon-light,
+html[data-theme='light'] .theme-toggle .theme-label-light {
+    display: block;
+}
+
+html[data-theme='dark'] .theme-toggle .theme-icon-dark,
+html[data-theme='dark'] .theme-toggle .theme-label-dark {
+    display: block;
 }
 
 /* --- Footer --- */

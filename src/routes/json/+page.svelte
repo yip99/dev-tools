@@ -1,6 +1,7 @@
 <!-- src/routes/json/+page.svelte -->
 <script>
 	import { untrack } from 'svelte';
+	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
 
@@ -338,10 +339,7 @@
 	</div>
 
 	{#if error}
-		<div class="error-box">
-			<span class="error-icon">!</span>
-			{error}
-		</div>
+		<AlertBox type="error">{error}</AlertBox>
 	{/if}
 
 	<div class="input-group output-group">

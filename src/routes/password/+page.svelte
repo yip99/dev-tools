@@ -1,6 +1,7 @@
 <!-- src/routes/password/+page.svelte -->
 <script>
 	import { browser } from '$app/environment';
+	import AlertBox from '$lib/components/AlertBox.svelte';
 
 	const CHARSETS = {
 		lowercase: 'abcdefghijklmnopqrstuvwxyz',
@@ -403,12 +404,14 @@
 	{/if}
 
 	{#if mode === 'password' && count > maxCombinations}
-		<div class="warn-box">
-			<span class="warn-icon">⚠</span>
+		<AlertBox type="warn">
 			Only {maxCombinations.toLocaleString()} unique combination{maxCombinations === 1 ? '' : 's'} possible
 			with {availableChars.length} characters at length {length}. Increase length or add more
 			characters.
-		</div>
+		</AlertBox>
+	{/if}
+	{#if mode === 'password' && !availableChars.length}
+		<AlertBox type="error">No characters selected. Enable at least one character group.</AlertBox>
 	{/if}
 
 	<!-- Generate Button -->
@@ -463,11 +466,6 @@
 					</div>
 				{/each}
 			</div>
-		</div>
-	{:else if mode === 'password' && !availableChars.length}
-		<div class="error-box">
-			<span class="error-icon">!</span>
-			No characters selected. Enable at least one character group.
 		</div>
 	{/if}
 </article>
@@ -740,50 +738,11 @@
 		color: var(--fg);
 	}
 
-	/* --- Error --- */
-	.error-box {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.75rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--accent-red);
-		border-radius: 6px;
-		color: var(--accent-red);
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		background: rgba(255, 77, 77, 0.05);
-	}
-
-	.error-icon {
-		font-weight: bold;
-		font-size: 1.1rem;
-	}
-
 	code {
 		font-family: var(--font-mono);
 		font-size: 0.85em;
 		padding: 0.15em 0.35em;
 		border-radius: 3px;
 		background: rgba(128, 128, 128, 0.1);
-	}
-
-	.warn-box {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.75rem;
-		margin-top: 0.75rem;
-		border: 1px solid var(--accent-gold);
-		border-radius: 6px;
-		color: var(--accent-gold);
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		background: rgba(251, 191, 36, 0.05);
-	}
-
-	.warn-icon {
-		font-size: 1.1rem;
-		flex-shrink: 0;
 	}
 </style>

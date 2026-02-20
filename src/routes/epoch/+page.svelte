@@ -1,6 +1,7 @@
 <!-- src/routes/epoch/+page.svelte -->
 <script>
 	import { onMount } from 'svelte';
+	import AlertBox from '$lib/components/AlertBox.svelte';
 
 	let epochInput = $state('');
 	let datePickerValue = $state('');
@@ -223,10 +224,8 @@
 	</div>
 
 	{#if result?.error}
-		<div class="error-box">
-			<span class="error-icon">!</span>
-			{result.error}
-		</div>
+		{result.error}
+		<AlertBox type="error">{result.error}</AlertBox>
 	{/if}
 
 	{#if result && !result.error}
@@ -467,25 +466,5 @@
 
 	.copy-btn:hover {
 		color: var(--fg);
-	}
-
-	/* --- Error --- */
-	.error-box {
-		display: flex;
-		align-items: center;
-		gap: 0.75rem;
-		padding: 0.75rem;
-		margin-bottom: 1.5rem;
-		border: 1px solid var(--accent-red);
-		border-radius: 6px;
-		color: var(--accent-red);
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		background: rgba(255, 77, 77, 0.05);
-	}
-
-	.error-icon {
-		font-weight: bold;
-		font-size: 1.1rem;
 	}
 </style>

@@ -1,6 +1,7 @@
 <!-- src/routes/diff/+page.svelte -->
 <script>
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
+	import AlertBox from '$lib/components/AlertBox.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
 
 	let original = $state('');
@@ -188,10 +189,7 @@ users.forEach((user) => greet(user));`;
 	</div>
 
 	{#if identical}
-		<div class="identical-box">
-			<span class="identical-icon">✓</span>
-			Texts are identical. No differences found.
-		</div>
+		<AlertBox type="success">Texts are identical. No differences found.</AlertBox>
 	{/if}
 
 	{#if hasChanges}

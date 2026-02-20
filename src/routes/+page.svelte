@@ -15,6 +15,16 @@
 
 		<!-- Tools Grid -->
 		<div class="tools-grid">
+			<!-- UNIX Time -->
+			<a href="/epoch" class="tool-card">
+				<div class="tool-header">
+					<span class="tool-icon">1970</span>
+					<span class="tool-arrow">→</span>
+				</div>
+				<h3>Epoch Converter</h3>
+				<p>Human-readable timestamps from integer seconds. Time is an illusion.</p>
+			</a>
+
 			<!-- JSON Formatter -->
 			<a href="/json" class="tool-card">
 				<div class="tool-header">
@@ -58,25 +68,25 @@
 				<p>High entropy strings. Adjustable length and character sets. Don't use "password123".</p>
 			</a>
 
+			<!-- Regex Builder -->
+			<a href="/regex" class="tool-card">
+				<div class="tool-header">
+					<span class="tool-icon accent-green">/.*/</span>
+					<span class="tool-arrow">→</span>
+				</div>
+				<h3>Regex Builder</h3>
+				<p>Test patterns against strings. Live matches and capture groups highlighted.</p>
+			</a>
+
 			<!-- Base64 -->
-			<a href="/base64" class="tool-card">
+			<!-- <a href="/base64" class="tool-card">
 				<div class="tool-header">
 					<span class="tool-icon">64</span>
 					<span class="tool-arrow">→</span>
 				</div>
 				<h3>Base64 Encode</h3>
 				<p>Convert text to Base64 and back. Useful for basic auth headers and data URIs.</p>
-			</a>
-
-			<!-- UNIX Time -->
-			<a href="/epoch" class="tool-card">
-				<div class="tool-header">
-					<span class="tool-icon">1970</span>
-					<span class="tool-arrow">→</span>
-				</div>
-				<h3>Epoch Converter</h3>
-				<p>Human-readable timestamps from integer seconds. Time is an illusion.</p>
-			</a>
+			</a> -->
 		</div>
 
 		<div class="calibrating-box" style="margin-top: 3rem;">More modules compiling...</div>

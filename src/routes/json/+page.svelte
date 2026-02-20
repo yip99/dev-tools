@@ -332,9 +332,9 @@
 				<button class="btn-secondary" onclick={escapeJSON} disabled={!input}>Escape</button>
 				<button class="btn-secondary" onclick={unescapeJSON} disabled={!input}>Unescape</button>
 			</div>
-		</div>
-		<div class="controls-row right-align">
-			<button class="text-btn" onclick={clear} disabled={!input && !output}>Clear All</button>
+			<div class="right-align">
+				<button class="text-btn" onclick={clear} disabled={!input && !output}>Clear All</button>
+			</div>
 		</div>
 	</div>
 

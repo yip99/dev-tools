@@ -1,9 +1,11 @@
-<!-- src/routes/json/+page.svelte -->
+<!-- src/routes/formatter/+page.svelte -->
 <script>
 	import { untrack } from 'svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
+	import { detectLanguage } from '$lib/utils/highlight.js';
+	import { formatJavaScript, minifyJavaScript } from '$lib/utils/format.js';
 
 	let input = $state('');
 	let output = $state('');
@@ -16,11 +18,16 @@
 	let removeNulls = $state(false);
 	let spaceAfterColon = $state(false);
 	let wrapLines = $state(false);
+	let languageChoice = $state('auto');
 
 	let lastMode = $state('format');
 	let resultView = $state('formatted');
 
 	let indentValue = $derived((indentChar === 'tab' ? '\t' : ' ').repeat(indentSize));
+	let detectedLanguage = $derived(detectLanguage(input));
+	let language = $derived(languageChoice === 'auto' ? detectedLanguage : languageChoice);
+	let isJSON = $derived(language === 'json');
+	let isJS = $derived(language === 'javascript');
 	let diff = $derived(computeDiff(input, output));
 
 	$effect(() => {
@@ -37,10 +44,13 @@
 		void indentValue;
 		void removeNulls;
 		void spaceAfterColon;
+		void languageChoice;
 		untrack(() => {
 			if (input.trim() && output) applyMode();
 		});
 	});
+
+	// ── JSON utilities ──────────────────────────────────────────
 
 	function stringify(data, indent = null) {
 		let result = JSON.stringify(data, null, indent);
@@ -99,7 +109,7 @@
 			.reduce((acc, key) => ({ ...acc, [key]: sortKeys(obj[key]) }), {});
 	}
 
-	function process(transformFn) {
+	function processJSON(transformFn) {
 		if (!input.trim()) return;
 		try {
 			let parsed = parseInput(input);
@@ -112,21 +122,42 @@
 		}
 	}
 
+	// ── Mode application ────────────────────────────────────────
+
 	function applyMode() {
-		const modes = {
-			format: () => process((d) => stringify(d, indentValue)),
-			minify: () => process((d) => JSON.stringify(d)),
-			sort: () => process((d) => stringify(sortKeys(d), indentValue))
-		};
-		(modes[lastMode] || modes.format)();
+		if (!input.trim()) return;
+
+		if (isJSON) {
+			const modes = {
+				format: () => processJSON((d) => stringify(d, indentValue)),
+				minify: () => processJSON((d) => JSON.stringify(d)),
+				sort: () => processJSON((d) => stringify(sortKeys(d), indentValue))
+			};
+			(modes[lastMode] || modes.format)();
+		} else if (isJS) {
+			try {
+				if (lastMode === 'minify') {
+					output = minifyJavaScript(input);
+				} else {
+					output = formatJavaScript(input, indentValue);
+				}
+				error = null;
+			} catch (e) {
+				error = 'Format error: ' + e.message;
+				output = '';
+			}
+		} else {
+			output = input;
+			error = null;
+		}
 	}
 
-	function formatJSON() {
+	function formatCode() {
 		lastMode = 'format';
 		applyMode();
 	}
 
-	function minifyJSON() {
+	function minifyCode() {
 		lastMode = 'minify';
 		applyMode();
 	}
@@ -154,6 +185,8 @@
 		}
 	}
 
+	// ── UI utilities ────────────────────────────────────────────
+
 	function clear() {
 		input = '';
 		output = '';
@@ -171,10 +204,21 @@
 		}
 	}
 
+	const SAMPLES = {
+		json: '{ id: 1, name: "DevTool User", active: true, score: 42.5, empty: null, tags: ["admin", "dev"], list: [1, 2, ], }',
+		javascript:
+			'// User service\nconst getUser=async(id)=>{const res=await fetch(`/api/users/${id}`);if(!res.ok){throw new Error("Not found")}const data=await res.json();return{id:data.id,name:data.name,active:true,tags:["admin","dev"]}};'
+	};
+
 	function loadSample() {
-		input = '{ id: 1, name: "DevTool User", empty: null, list: [1, 2, ], }';
+		if (languageChoice === 'auto') {
+			languageChoice = 'json';
+		}
+		input = SAMPLES[language] || SAMPLES.json;
 		if (!autoFormat) applyMode();
 	}
+
+	// ── Stats ───────────────────────────────────────────────────
 
 	function countKeys(obj) {
 		if (typeof obj !== 'object' || obj === null) return 0;
@@ -198,9 +242,11 @@
 		const lines = text.split('\n').length;
 		const size = formatSize(byteSize(text));
 		let keys = null;
-		try {
-			keys = countKeys(parseInput(text));
-		} catch {}
+		if (isJSON) {
+			try {
+				keys = countKeys(parseInput(text));
+			} catch {}
+		}
 		return { lines, keys, size };
 	});
 
@@ -210,9 +256,11 @@
 		const lines = text.split('\n').length;
 		const size = formatSize(byteSize(text));
 		let keys = null;
-		try {
-			keys = countKeys(JSON.parse(text));
-		} catch {}
+		if (isJSON) {
+			try {
+				keys = countKeys(JSON.parse(text));
+			} catch {}
+		}
 		return { lines, keys, size };
 	});
 
@@ -227,20 +275,47 @@
 </script>
 
 <svelte:head>
-	<title>JSON Formatter - DevTools</title>
+	<title
+		>{language
+			? `${language === 'javascript' ? 'JS' : language.toUpperCase()} Formatter`
+			: 'Code Formatter'}
+		- DevTools</title
+	>
 </svelte:head>
 
 <article class="post">
 	<header class="post-header">
-		<h1>JSON Formatter</h1>
-		<span class="post-date">Validate, clean, sort, and fix.</span>
+		<h1>Code Formatter</h1>
+		<span class="post-date"
+			>Format, validate, and transform. <span class="accent-gold">Syntax highlighted.</span></span
+		>
 	</header>
 
 	<p>
-		Parse messy JSON strings. Smart-fix handles missing quotes and trailing commas automatically.
+		Paste code to format with syntax highlighting.
+		{#if isJSON}
+			Smart-fix handles missing quotes and trailing commas automatically.
+		{:else if isJS}
+			Re-indents and cleans up JavaScript code.
+		{:else}
+			Select a language or paste code to auto-detect.
+		{/if}
 	</p>
 
 	<div class="settings-row">
+		<div class="setting-item">
+			<label for="language-select">Language</label>
+			<select id="language-select" bind:value={languageChoice}>
+				<option value="auto"
+					>Auto{detectedLanguage
+						? ` (${detectedLanguage === 'javascript' ? 'JS' : detectedLanguage.toUpperCase()})`
+						: ''}</option
+				>
+				<option value="json">JSON</option>
+				<option value="javascript">JavaScript</option>
+			</select>
+		</div>
+
 		<div class="setting-item">
 			<label for="indent-char">Character</label>
 			<select id="indent-char" bind:value={indentChar}>
@@ -264,14 +339,16 @@
 				<input type="checkbox" id="auto-format" bind:checked={autoFormat} />
 				<label for="auto-format">Auto-format</label>
 			</div>
-			<div class="setting-item checkbox-item">
-				<input type="checkbox" id="remove-nulls" bind:checked={removeNulls} />
-				<label for="remove-nulls">Remove nulls</label>
-			</div>
-			<div class="setting-item checkbox-item">
-				<input type="checkbox" id="space-after-colon" bind:checked={spaceAfterColon} />
-				<label for="space-after-colon">Space after colon</label>
-			</div>
+			{#if isJSON}
+				<div class="setting-item checkbox-item">
+					<input type="checkbox" id="remove-nulls" bind:checked={removeNulls} />
+					<label for="remove-nulls">Remove nulls</label>
+				</div>
+				<div class="setting-item checkbox-item">
+					<input type="checkbox" id="space-after-colon" bind:checked={spaceAfterColon} />
+					<label for="space-after-colon">Space after colon</label>
+				</div>
+			{/if}
 			<div class="setting-item checkbox-item">
 				<input type="checkbox" id="wrap-lines" bind:checked={wrapLines} />
 				<label for="wrap-lines">Wrap lines</label>
@@ -281,24 +358,23 @@
 
 	<div class="input-group">
 		<div class="label-row">
-			<label for="json-input">Input</label>
+			<label for="code-input">Input</label>
 			<button class="text-btn" onclick={loadSample}>Load Sample</button>
 		</div>
 		<CodeEditor
-			id="json-input"
+			id="code-input"
 			bind:value={input}
-			placeholder="Paste JSON (trailing commas & unquoted keys allowed)..."
+			placeholder="Paste code here..."
 			rows={8}
 			wrap={wrapLines}
+			{language}
 		/>
 		{#if inputStats}
 			<div class="stats-bar">
 				<span>{inputStats.lines} lines</span>
-				<span class="stats-sep">·</span>
 				{#if inputStats.keys !== null}
+					<span class="stats-sep">·</span>
 					<span>{inputStats.keys} keys</span>
-				{:else}
-					<span>— keys</span>
 				{/if}
 				<span class="stats-sep">·</span>
 				<span>{inputStats.size}</span>
@@ -312,26 +388,30 @@
 				<button
 					class="btn-primary"
 					class:btn-active={lastMode === 'format'}
-					onclick={formatJSON}
-					disabled={!input}>Format</button
+					onclick={formatCode}
+					disabled={!input || (!isJSON && !isJS)}>Format</button
 				>
 				<button
 					class="btn-primary"
 					class:btn-active={lastMode === 'minify'}
-					onclick={minifyJSON}
-					disabled={!input}>Minify</button
+					onclick={minifyCode}
+					disabled={!input || (!isJSON && !isJS)}>Minify</button
 				>
-				<button
-					class="btn-primary"
-					class:btn-active={lastMode === 'sort'}
-					onclick={sortJSON}
-					disabled={!input}>Sort</button
-				>
+				{#if isJSON}
+					<button
+						class="btn-primary"
+						class:btn-active={lastMode === 'sort'}
+						onclick={sortJSON}
+						disabled={!input}>Sort</button
+					>
+				{/if}
 			</div>
-			<div class="btn-group">
-				<button class="btn-secondary" onclick={escapeJSON} disabled={!input}>Escape</button>
-				<button class="btn-secondary" onclick={unescapeJSON} disabled={!input}>Unescape</button>
-			</div>
+			{#if isJSON}
+				<div class="btn-group">
+					<button class="btn-secondary" onclick={escapeJSON} disabled={!input}>Escape</button>
+					<button class="btn-secondary" onclick={unescapeJSON} disabled={!input}>Unescape</button>
+				</div>
+			{/if}
 			<div class="right-align">
 				<button class="text-btn" onclick={clear} disabled={!input && !output}>Clear All</button>
 			</div>
@@ -372,13 +452,14 @@
 
 		{#if resultView === 'formatted'}
 			<CodeEditor
-				id="json-output"
+				id="code-output"
 				value={output}
 				readonly
 				placeholder="Result will appear here..."
 				rows={8}
 				error={!!error}
 				wrap={wrapLines}
+				{language}
 			/>
 		{:else}
 			<CodeEditor
@@ -394,11 +475,9 @@
 		{#if outputStats}
 			<div class="stats-bar">
 				<span>{outputStats.lines} lines</span>
-				<span class="stats-sep">·</span>
 				{#if outputStats.keys !== null}
+					<span class="stats-sep">·</span>
 					<span>{outputStats.keys} keys</span>
-				{:else}
-					<span>— keys</span>
 				{/if}
 				<span class="stats-sep">·</span>
 				<span>{outputStats.size}</span>
@@ -426,7 +505,6 @@
 </article>
 
 <style>
-	/* --- View Tabs (JSON page only) --- */
 	.view-tabs {
 		display: flex;
 		border: 1px solid var(--border);

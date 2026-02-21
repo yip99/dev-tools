@@ -23,13 +23,13 @@
 				<p>Human-readable timestamps from integer seconds. Time is an illusion.</p>
 			</a>
 
-			<a href="/json" class="tool-card">
+			<a href="/formatter" class="tool-card">
 				<div class="tool-header">
 					<span class="tool-icon accent-gold">{'{ }'}</span>
 					<span class="tool-arrow">→</span>
 				</div>
-				<h3>JSON Formatter</h3>
-				<p>Validate, prettify, and minify JSON. Handling whitespace so you don't have to.</p>
+				<h3>Code Formatter</h3>
+				<p>Format, validate, and syntax-highlight JSON & JavaScript. More languages coming.</p>
 			</a>
 
 			<a href="/diff" class="tool-card">

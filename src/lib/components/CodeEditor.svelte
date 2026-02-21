@@ -1,6 +1,7 @@
 <!-- src/lib/components/CodeEditor.svelte -->
 <script>
 	import { tick } from 'svelte';
+	import { highlight } from '$lib/utils/highlight.js';
 
 	let {
 		value = $bindable(''),
@@ -10,6 +11,7 @@
 		rows = 8,
 		error = false,
 		wrap = false,
+		language = null,
 		diffMarkers = undefined,
 		diffSegments = undefined
 	} = $props();
@@ -19,6 +21,7 @@
 	let mirrorEl = $state(null);
 	let diffLayerEl = $state(null);
 	let overlayEl = $state(null);
+	let syntaxEl = $state(null);
 	let scrollbarH = $state(0);
 	let scrollbarW = $state(0);
 	let lineHeights = $state([]);
@@ -27,6 +30,17 @@
 	let scrollTop = $state(0);
 
 	const LINE_H = 20;
+
+	const TOKEN_COLORS = {
+		key: 'var(--hl-key)',
+		string: 'var(--hl-string)',
+		number: 'var(--hl-number)',
+		boolean: 'var(--hl-boolean)',
+		null: 'var(--hl-null)',
+		keyword: 'var(--hl-keyword)',
+		comment: 'var(--hl-comment)',
+		punctuation: 'var(--hl-punctuation)'
+	};
 
 	let lineCount = $derived(Math.max((value ?? '').split('\n').length, rows));
 	let lineTexts = $derived((value ?? '').split('\n'));
@@ -37,6 +51,8 @@
 	let lines = $derived(Array.from({ length: lineCount }, (_, i) => i + 1));
 	let digits = $derived(Math.max(2, String(lineCount).length));
 	let hasDiff = $derived(Array.isArray(diffMarkers) && diffMarkers.length > 0);
+	let highlightTokens = $derived(language ? highlight(value ?? '', language) : null);
+	let hasSyntax = $derived(!!highlightTokens && !hasDiff);
 
 	let highlightStyle = $derived.by(() => {
 		if (activeLine < 0 || !focused || readonly || hasDiff) return null;
@@ -125,6 +141,10 @@
 			overlayEl.scrollTop = top;
 			overlayEl.scrollLeft = left;
 		}
+		if (syntaxEl) {
+			syntaxEl.scrollTop = top;
+			syntaxEl.scrollLeft = left;
+		}
 		scrollTop = top;
 		scrollbarH = textareaEl.offsetHeight - textareaEl.clientHeight;
 	}
@@ -166,6 +186,7 @@
 	class:is-readonly={readonly}
 	class:is-wrap={wrap}
 	class:is-diff={hasDiff}
+	class:is-syntax={hasSyntax}
 	style:--digits={digits}
 >
 	{#if hasDiff}
@@ -215,6 +236,32 @@
 								<span>{seg.text}</span>
 							{/if}
 						{/each}
+					{:else}
+						{lineTexts[i] ?? ''}
+					{/if}
+				</div>
+			{/each}
+		</div>
+	{/if}
+
+	{#if hasSyntax}
+		<div
+			class="syntax-overlay"
+			bind:this={syntaxEl}
+			aria-hidden="true"
+			style:bottom="{scrollbarH}px"
+			style:right="{scrollbarW}px"
+		>
+			{#each lines as _, i}
+				<div
+					class="overlay-line"
+					style:height={wrap && lineHeights[i] ? `${lineHeights[i]}px` : null}
+				>
+					{#if highlightTokens?.[i]?.length}
+						{#each highlightTokens[i] as token}<span
+								style:color={TOKEN_COLORS[token.type]}
+								class:token-comment={token.type === 'comment'}>{token.text}</span
+							>{/each}
 					{:else}
 						{lineTexts[i] ?? ''}
 					{/if}
@@ -331,8 +378,9 @@
 		border-left: 3px solid rgba(251, 191, 36, 0.45);
 	}
 
-	/* ── Text overlay ── */
-	.text-overlay {
+	/* ── Text overlay (shared by diff + syntax) ── */
+	.text-overlay,
+	.syntax-overlay {
 		position: absolute;
 		top: 0;
 		left: 0;
@@ -347,7 +395,8 @@
 		z-index: 1;
 	}
 
-	.is-wrap .text-overlay {
+	.is-wrap .text-overlay,
+	.is-wrap .syntax-overlay {
 		white-space: pre-wrap;
 		word-wrap: break-word;
 		overflow-wrap: break-word;
@@ -377,7 +426,12 @@
 		padding: 1px 0;
 	}
 
-	/* ── Gutter (opaque background to prevent text bleed) ── */
+	/* ── Token styles ── */
+	.token-comment {
+		font-style: italic;
+	}
+
+	/* ── Gutter ── */
 	.gutter {
 		position: absolute;
 		top: 0;
@@ -483,6 +537,15 @@
 	}
 
 	.is-diff textarea::selection {
+		background: rgba(128, 128, 128, 0.25);
+	}
+
+	.is-syntax textarea {
+		color: transparent;
+		caret-color: var(--fg);
+	}
+
+	.is-syntax textarea::selection {
 		background: rgba(128, 128, 128, 0.25);
 	}
 

@@ -3,6 +3,8 @@
 	import { onMount } from 'svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 
+	const DISCORD_EPOCH = 1420070400000;
+
 	let epochInput = $state('');
 	let datePickerValue = $state('');
 	let nowMs = $state(Date.now());
@@ -22,10 +24,6 @@
 		return () => cancelAnimationFrame(frame);
 	});
 
-	function isMilliseconds(num) {
-		return Math.abs(num) > 1e12;
-	}
-
 	function pad(n) {
 		return String(n).padStart(2, '0');
 	}
@@ -40,7 +38,6 @@
 	function pickerToDate(value) {
 		if (!value) return null;
 		if (dateZone === 'gmt') {
-			// Parse as UTC
 			const [datePart, timePart] = value.split('T');
 			const [y, mo, d] = datePart.split('-').map(Number);
 			const [h, mi, s] = (timePart || '00:00:00').split(':').map(Number);
@@ -63,8 +60,46 @@
 		return `${pre}${Math.floor(abs / 31_536_000_000)}y${suf}`;
 	}
 
-	function epochToMs(num) {
+	function rawToMs(raw) {
+		const trimmed = raw.trim();
+		if (!trimmed) return NaN;
+		if (selectedUnit === 'discordSnowflake') {
+			try {
+				return Number(BigInt(trimmed) >> 22n) + DISCORD_EPOCH;
+			} catch {
+				return NaN;
+			}
+		}
+		const num = Number(trimmed);
+		if (!Number.isFinite(num)) return NaN;
 		return selectedUnit === 'milliseconds' ? num : num * 1000;
+	}
+
+	function msToInput(ms) {
+		if (selectedUnit === 'discordSnowflake') {
+			const snowflake = (BigInt(ms) - BigInt(DISCORD_EPOCH)) << 22n;
+			return String(snowflake < 0n ? 0n : snowflake);
+		}
+		if (selectedUnit === 'milliseconds') return String(ms);
+		return String(Math.floor(ms / 1000));
+	}
+
+	function detectUnit(raw) {
+		const trimmed = raw.trim();
+		if (!trimmed) return selectedUnit;
+		const num = Number(trimmed);
+		if (!Number.isFinite(num)) return selectedUnit;
+		const abs = Math.abs(num);
+		if (num > 0 && abs > 1e15) {
+			try {
+				const ms = Number(BigInt(trimmed) >> 22n) + DISCORD_EPOCH;
+				const year = new Date(ms).getFullYear();
+				if (year >= 2015 && year <= 2100) return 'discordSnowflake';
+			} catch {
+				/* fall through */
+			}
+		}
+		return abs > 1e11 ? 'milliseconds' : 'seconds';
 	}
 
 	function handleEpochInput() {
@@ -73,12 +108,9 @@
 			datePickerValue = '';
 			return;
 		}
-		const num = Number(raw);
-		if (!Number.isFinite(num)) return;
-
-		selectedUnit = isMilliseconds(num) ? 'milliseconds' : 'seconds';
-
-		const ms = epochToMs(num);
+		selectedUnit = detectUnit(raw);
+		const ms = rawToMs(raw);
+		if (isNaN(ms)) return;
 		const d = new Date(ms);
 		if (isNaN(d.getTime())) return;
 		datePickerValue = toDatetimeLocal(d);
@@ -87,9 +119,8 @@
 	function handleUnitChange() {
 		const raw = epochInput.trim();
 		if (!raw) return;
-		const num = Number(raw);
-		if (!Number.isFinite(num)) return;
-		const ms = epochToMs(num);
+		const ms = rawToMs(raw);
+		if (isNaN(ms)) return;
 		const d = new Date(ms);
 		if (isNaN(d.getTime())) return;
 		datePickerValue = toDatetimeLocal(d);
@@ -98,11 +129,7 @@
 	function handlePickerInput() {
 		const d = pickerToDate(datePickerValue);
 		if (!d || isNaN(d.getTime())) return;
-		if (selectedUnit === 'milliseconds') {
-			epochInput = String(d.getTime());
-		} else {
-			epochInput = String(Math.floor(d.getTime() / 1000));
-		}
+		epochInput = msToInput(d.getTime());
 	}
 
 	function handleZoneChange() {
@@ -117,26 +144,32 @@
 	}
 
 	let result = $derived.by(() => {
+		const empty = {
+			utc: null,
+			iso: null,
+			local: null,
+			seconds: null,
+			milliseconds: null
+		};
 		const raw = epochInput.trim();
-		if (!raw) return null;
-		const num = Number(raw);
-		if (!Number.isFinite(num)) return { error: 'Not a valid number' };
-		const ms = epochToMs(num);
+		if (!raw) return empty;
+		const ms = rawToMs(raw);
+		if (isNaN(ms)) return { ...empty, error: 'Not a valid number' };
 		const d = new Date(ms);
-		if (isNaN(d.getTime())) return { error: 'Invalid timestamp' };
-		if (d.getFullYear() < 0 || d.getFullYear() > 9999) return { error: 'Out of range' };
+		if (isNaN(d.getTime())) return { ...empty, error: 'Invalid timestamp' };
+		const msVal = d.getTime();
 		return {
 			date: d,
 			utc: d.toUTCString(),
 			iso: d.toISOString(),
 			local: d.toString(),
-			seconds: Math.floor(d.getTime() / 1000),
-			milliseconds: d.getTime()
+			seconds: Math.floor(msVal / 1000),
+			milliseconds: msVal
 		};
 	});
 
 	let relative = $derived.by(() => {
-		if (!result || result.error) return null;
+		if (!result?.date || result.error) return null;
 		return relativeTime(result.date, nowMs);
 	});
 
@@ -165,7 +198,10 @@
 		>
 	</header>
 
-	<p>Convert between Unix timestamps and human dates. Auto-detects seconds vs milliseconds.</p>
+	<p>
+		Convert between Unix timestamps and human dates. Auto-detects seconds, milliseconds, and Discord
+		snowflakes.
+	</p>
 
 	<!-- Live Clock -->
 	<div class="now-bar">
@@ -189,14 +225,13 @@
 					placeholder="1700000000"
 					inputmode="numeric"
 				/>
-				{#if epochInput.trim()}
-					<div class="unit-bar">
-						<select class="unit-select" bind:value={selectedUnit} onchange={handleUnitChange}>
-							<option value="seconds">Seconds</option>
-							<option value="milliseconds">Milliseconds</option>
-						</select>
-					</div>
-				{/if}
+				<div class="unit-bar">
+					<select class="unit-select" bind:value={selectedUnit} onchange={handleUnitChange}>
+						<option value="seconds">Seconds</option>
+						<option value="milliseconds">Milliseconds</option>
+						<option value="discordSnowflake">Discord Snowflake</option>
+					</select>
+				</div>
 			</div>
 		</div>
 
@@ -224,73 +259,32 @@
 	</div>
 
 	{#if result?.error}
-		{result.error}
 		<AlertBox type="error">{result.error}</AlertBox>
 	{/if}
 
-	{#if result && !result.error}
-		<div class="input-group">
-			<div class="label-row">
-				<label>Result</label>
-			</div>
-			<div class="result-card">
-				<div class="result-row">
-					<span class="result-label">Local</span>
-					<div class="result-value-row">
-						<span class="result-value">{result.local}</span>
-						<button class="copy-btn" onclick={() => copyValue('local', result.local)}>
-							{copied.local ? 'Copied!' : 'Copy'}
-						</button>
-					</div>
-				</div>
-				<div class="result-row">
-					<span class="result-label">UTC</span>
-					<div class="result-value-row">
-						<span class="result-value">{result.utc}</span>
-						<button class="copy-btn" onclick={() => copyValue('utc', result.utc)}>
-							{copied.utc ? 'Copied!' : 'Copy'}
-						</button>
-					</div>
-				</div>
-				<div class="result-row">
-					<span class="result-label">ISO 8601</span>
-					<div class="result-value-row">
-						<span class="result-value">{result.iso}</span>
-						<button class="copy-btn" onclick={() => copyValue('iso', result.iso)}>
-							{copied.iso ? 'Copied!' : 'Copy'}
-						</button>
-					</div>
-				</div>
-				<div class="result-row">
-					<span class="result-label">Milliseconds</span>
-					<div class="result-value-row">
-						<span class="result-value">{result.milliseconds}</span>
-						<button class="copy-btn" onclick={() => copyValue('ms', String(result.milliseconds))}>
-							{copied.ms ? 'Copied!' : 'Copy'}
-						</button>
-					</div>
-				</div>
-				<div class="result-row">
-					<span class="result-label">Seconds</span>
-					<div class="result-value-row">
-						<span class="result-value">{result.seconds}</span>
-						<button class="copy-btn" onclick={() => copyValue('sec', String(result.seconds))}>
-							{copied.sec ? 'Copied!' : 'Copy'}
-						</button>
-					</div>
-				</div>
-				<div class="result-row">
-					<span class="result-label">Relative</span>
-					<div class="result-value-row">
-						<span class="result-value accent-gold">{relative}</span>
-						<button class="copy-btn" onclick={() => copyValue('relative', relative)}>
-							{copied.relative ? 'Copied!' : 'Copy'}
-						</button>
-					</div>
-				</div>
-			</div>
+	<div class="input-group">
+		<div class="label-row">
+			<label>Result</label>
 		</div>
-	{/if}
+		<div class="result-card">
+			{#each [...Object.entries(result || {}).filter(([k]) => k !== 'date' && k !== 'error'), ['relative', relative]] as [key, value]}
+				<div class="result-row">
+					<span class="result-label">{key}</span>
+					<div class="result-value-row">
+						{#if value != null && !result.error}
+							<span class="result-value">{value}</span>
+							<button class="copy-btn" onclick={() => copyValue(key, String(value))}>
+								{copied[key] ? 'Copied!' : 'Copy'}
+							</button>
+						{:else}
+							<span class="result-label result-value">-</span>
+							<button class="result-label copy-btn">{' '}</button>
+						{/if}
+					</div>
+				</div>
+			{/each}
+		</div>
+	</div>
 </article>
 
 <style>

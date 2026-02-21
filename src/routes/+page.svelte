@@ -29,7 +29,7 @@
 					<span class="tool-arrow">→</span>
 				</div>
 				<h3>Code Formatter</h3>
-				<p>Format, validate, and syntax-highlight JSON & JavaScript. More languages coming.</p>
+				<p>Format, validate, and syntax-highlight JSON, HTML, CSS, JavaScript, etc.</p>
 			</a>
 
 			<a href="/diff" class="tool-card">

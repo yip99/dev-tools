@@ -3,23 +3,27 @@
 import * as prettier from 'prettier/standalone';
 import * as prettierBabel from 'prettier/plugins/babel';
 import * as prettierEstree from 'prettier/plugins/estree';
+import * as prettierHtml from 'prettier/plugins/html';
+import * as prettierCss from 'prettier/plugins/postcss';
 
-const PLUGINS = [prettierBabel, prettierEstree];
+const PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss];
 
 const PARSERS = {
     json: 'json',
-    javascript: 'babel'
+    javascript: 'babel',
+    html: 'html',
+    css: 'css'
 };
 
 // ── Prettier formatting (async) ─────────────────────────────────
 
 /**
  * Format code using Prettier.
- * @param {string} code - valid source code
- * @param {string} language - 'json' | 'javascript'
+ * @param {string} code
+ * @param {string} language - 'json' | 'javascript' | 'html' | 'css'
  * @param {object} [options]
- * @param {string} [options.indent] - indent string (e.g. '  ' or '\t')
- * @param {number} [options.indentSize] - tab display width (used when indent is tab)
+ * @param {string} [options.indent]
+ * @param {number} [options.indentSize]
  * @returns {Promise<string>}
  */
 export async function formatCode(code, language, options = {}) {
@@ -32,21 +36,40 @@ export async function formatCode(code, language, options = {}) {
     const tabWidth = indent[0] === '\t' ? (options.indentSize ?? 2) : indent.length;
     const useTabs = indent[0] === '\t';
 
-    const result = await prettier.format(code, {
+    const prettierOptions = {
         parser,
         plugins: PLUGINS,
         tabWidth,
         useTabs,
-        printWidth: 80,
-        ...(language === 'javascript' && {
+        printWidth: 80
+    };
+
+    if (language === 'javascript') {
+        Object.assign(prettierOptions, {
             semi: true,
             singleQuote: true,
             trailingComma: 'none',
             bracketSpacing: true,
             arrowParens: 'always'
-        })
-    });
+        });
+    }
 
+    if (language === 'html') {
+        Object.assign(prettierOptions, {
+            htmlWhitespaceSensitivity: 'css',
+            singleAttributePerLine: false,
+            bracketSameLine: false,
+            printWidth: 100
+        });
+    }
+
+    if (language === 'css') {
+        Object.assign(prettierOptions, {
+            singleQuote: false
+        });
+    }
+
+    const result = await prettier.format(code, prettierOptions);
     return result.replace(/\n$/, '');
 }
 
@@ -54,12 +77,16 @@ export async function formatCode(code, language, options = {}) {
 
 /**
  * Minify code. Synchronous.
- * For JSON, expects valid JSON (run through parseJSON first).
+ * @param {string} code
+ * @param {string} language
+ * @returns {string}
  */
 export function minifyCode(code, language) {
     if (!code?.trim()) return '';
     if (language === 'json') return JSON.stringify(JSON.parse(code));
     if (language === 'javascript') return minifyJS(code);
+    if (language === 'css') return minifyCSS(code);
+    if (language === 'html') return minifyHTML(code);
     return code;
 }
 
@@ -99,7 +126,7 @@ function minifyJS(code) {
             continue;
         }
 
-        // Template literal (preserve as-is — whitespace is significant)
+        // Template literal
         if (ch === '`') {
             out += ch;
             i++;
@@ -125,7 +152,7 @@ function minifyJS(code) {
             continue;
         }
 
-        // Regex literal (after operator/punctuation context)
+        // Regex literal
         if (ch === '/' && canStartRegex(out)) {
             out += ch;
             i++;
@@ -140,10 +167,14 @@ function minifyJS(code) {
             continue;
         }
 
-        // Whitespace — collapse and insert space only when syntactically needed
+        // Whitespace
         if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
             i++;
-            while (i < len && (code[i] === ' ' || code[i] === '\t' || code[i] === '\n' || code[i] === '\r')) i++;
+            while (
+                i < len &&
+                (code[i] === ' ' || code[i] === '\t' || code[i] === '\n' || code[i] === '\r')
+            )
+                i++;
             if (needsSpace(out, i < len ? code[i] : '')) out += ' ';
             continue;
         }
@@ -153,6 +184,81 @@ function minifyJS(code) {
     }
 
     return out;
+}
+
+function minifyCSS(code) {
+    let out = '';
+    let i = 0;
+    const len = code.length;
+
+    while (i < len) {
+        const ch = code[i];
+
+        // Comments
+        if (ch === '/' && i + 1 < len && code[i + 1] === '*') {
+            i += 2;
+            while (i < len && !(code[i] === '*' && i + 1 < len && code[i + 1] === '/')) i++;
+            if (i < len) i += 2;
+            continue;
+        }
+
+        // Strings
+        if (ch === '"' || ch === "'") {
+            const q = ch;
+            out += ch;
+            i++;
+            while (i < len && code[i] !== q) {
+                if (code[i] === '\\' && i + 1 < len) out += code[i++];
+                out += code[i++];
+            }
+            if (i < len) out += code[i++];
+            continue;
+        }
+
+        // Whitespace
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+            i++;
+            while (
+                i < len &&
+                (code[i] === ' ' || code[i] === '\t' || code[i] === '\n' || code[i] === '\r')
+            )
+                i++;
+            // Space needed between identifier-like chars, after colon in declarations
+            const last = out[out.length - 1];
+            const next = i < len ? code[i] : '';
+            if (last && next && !':;{},>+~)('.includes(last) && !':;{},>+~)('.includes(next)) {
+                out += ' ';
+            }
+            continue;
+        }
+
+        // Collapse semicolon before closing brace
+        if (ch === ';' && i + 1 < len) {
+            let j = i + 1;
+            while (j < len && (code[j] === ' ' || code[j] === '\t' || code[j] === '\n' || code[j] === '\r')) j++;
+            if (j < len && code[j] === '}') {
+                // Skip the semicolon
+                i++;
+                continue;
+            }
+        }
+
+        out += ch;
+        i++;
+    }
+
+    return out;
+}
+
+function minifyHTML(code) {
+    return code
+        // Remove HTML comments (but not conditional comments)
+        .replace(/<!--(?!\[)[\s\S]*?-->/g, '')
+        // Collapse whitespace between tags
+        .replace(/>\s+</g, '><')
+        // Collapse internal whitespace runs
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 }
 
 function needsSpace(output, nextChar) {

@@ -1,6 +1,5 @@
 <!-- src/routes/formatter/+page.svelte -->
 <script>
-	import 'highlight.js/styles/base16/solarized-light.css';
 	import { untrack } from 'svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
@@ -29,8 +28,7 @@
 	let detectedLanguage = $derived(detectLanguage(input));
 	let language = $derived(languageChoice === 'auto' ? detectedLanguage : languageChoice);
 	let isJSON = $derived(language === 'json');
-	let isJS = $derived(language === 'javascript');
-	let canFormat = $derived(isJSON || isJS);
+	let canFormat = $derived(['json', 'javascript', 'html', 'css'].includes(language));
 	let diff = $derived(computeDiff(input, output));
 
 	$effect(() => {
@@ -81,8 +79,8 @@
 	async function applyMode() {
 		if (!input.trim()) return;
 
+		// JSON with special options — use local stringify
 		if (isJSON && (lastMode === 'sort' || !spaceAfterColon || removeNulls)) {
-			// JSON with special options — use local stringify
 			if (lastMode === 'minify') {
 				processJSON((d) => JSON.stringify(d));
 			} else if (lastMode === 'sort') {
@@ -93,6 +91,7 @@
 			return;
 		}
 
+		// Minify (sync)
 		if (lastMode === 'minify') {
 			try {
 				if (isJSON) {
@@ -108,7 +107,7 @@
 			return;
 		}
 
-		// Format via Prettier
+		// Format via Prettier (async)
 		if (canFormat) {
 			formatting = true;
 			try {
@@ -186,7 +185,9 @@
 	const SAMPLES = {
 		json: '{ id: 1, name: "DevTool User", active: true, score: 42.5, empty: null, tags: ["admin", "dev"], list: [1, 2, ], }',
 		javascript:
-			'// User service\nconst getUser=async(id)=>{const res=await fetch(`/api/users/${id}`);if(!res.ok){throw new Error("Not found")}const data=await res.json();return{id:data.id,name:data.name,active:true,tags:["admin","dev"]}};'
+			'// User service\nconst getUser=async(id)=>{const res=await fetch(`/api/users/${id}`);if(!res.ok){throw new Error("Not found")}const data=await res.json();return{id:data.id,name:data.name,active:true,tags:["admin","dev"]}};',
+		html: '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Hello</title><link rel="stylesheet" href="style.css"></head><body><div class="container"><h1>Hello World</h1><p>This is a <strong>test</strong> paragraph.</p><ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul></div><script src="app.js"><\/script></body></html>',
+		css: ':root{--bg:#111;--fg:#eee;--accent:#fbbf24}.container{max-width:680px;margin:0 auto;padding:2rem 1.5rem;display:flex;flex-direction:column}.container h1{font-size:1.8rem;color:var(--fg);margin-bottom:.5rem}@media(max-width:640px){.container{padding:1rem}.container h1{font-size:1.4rem}}'
 	};
 
 	function loadSample() {
@@ -211,6 +212,12 @@
 		if (bytes < 1024) return `${bytes} B`;
 		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
 		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	function languageLabel(lang) {
+		if (!lang) return 'Code';
+		const labels = { json: 'JSON', javascript: 'JS', html: 'HTML', css: 'CSS' };
+		return labels[lang] || lang.toUpperCase();
 	}
 
 	let inputStats = $derived.by(() => {
@@ -252,11 +259,7 @@
 </script>
 
 <svelte:head>
-	<title
-		>{language
-			? `${language === 'javascript' ? 'JS' : language.toUpperCase()} Formatter`
-			: 'Code Formatter'} - DevTools</title
-	>
+	<title>{languageLabel(language)} Formatter - DevTools</title>
 </svelte:head>
 
 <article class="post">
@@ -268,13 +271,16 @@
 	</header>
 
 	<p>
-		Paste code to format with syntax highlighting.
 		{#if isJSON}
-			Smart-fix handles missing quotes and trailing commas automatically.
-		{:else if isJS}
-			Formats JavaScript with Prettier.
+			Format JSON with smart-fix for missing quotes and trailing commas.
+		{:else if language === 'javascript'}
+			Format JavaScript with Prettier. Re-indents and cleans up code.
+		{:else if language === 'html'}
+			Format HTML with Prettier. Cleans up tags and indentation.
+		{:else if language === 'css'}
+			Format CSS with Prettier. Organizes rules and indentation.
 		{:else}
-			Select a language or paste code to auto-detect.
+			Paste code to format with syntax highlighting. Auto-detects JSON, JavaScript, HTML, and CSS.
 		{/if}
 	</p>
 
@@ -283,12 +289,12 @@
 			<label for="language-select">Language</label>
 			<select id="language-select" bind:value={languageChoice}>
 				<option value="auto"
-					>Auto{detectedLanguage
-						? ` (${detectedLanguage === 'javascript' ? 'JS' : detectedLanguage.toUpperCase()})`
-						: ''}</option
+					>Auto{detectedLanguage ? ` (${languageLabel(detectedLanguage)})` : ''}</option
 				>
 				<option value="json">JSON</option>
 				<option value="javascript">JavaScript</option>
+				<option value="html">HTML</option>
+				<option value="css">CSS</option>
 			</select>
 		</div>
 

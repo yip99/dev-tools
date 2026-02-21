@@ -3,21 +3,27 @@
 import hljs from 'highlight.js/lib/core';
 import jsonLang from 'highlight.js/lib/languages/json';
 import jsLang from 'highlight.js/lib/languages/javascript';
+import htmlLang from 'highlight.js/lib/languages/xml';
+import cssLang from 'highlight.js/lib/languages/css';
 
 hljs.registerLanguage('json', jsonLang);
 hljs.registerLanguage('javascript', jsLang);
+hljs.registerLanguage('html', htmlLang);
+hljs.registerLanguage('css', cssLang);
 
 /**
  * Highlight code using highlight.js.
  * Returns per-line HTML strings, or null if unsupported/empty.
  * @param {string} text
- * @param {string} language - 'json' | 'javascript'
+ * @param {string} language - 'json' | 'javascript' | 'html' | 'css'
  * @returns {string[] | null}
  */
 export function highlight(text, language) {
     if (!text || !language) return null;
     try {
-        const result = hljs.highlight(text, { language, ignoreIllegals: true });
+        // highlight.js uses 'xml' internally for HTML
+        const lang = language === 'html' ? 'html' : language;
+        const result = hljs.highlight(text, { language: lang, ignoreIllegals: true });
         return splitHighlightedHTML(result.value);
     } catch {
         return null;
@@ -32,17 +38,32 @@ export function highlight(text, language) {
 export function detectLanguage(text) {
     if (!text) return null;
     const t = text.trimStart();
+
+    // HTML — starts with doctype, tag, or comment
+    if (/^(<!DOCTYPE|<html|<\!--|<[a-zA-Z])/i.test(t)) return 'html';
+
+    // CSS — starts with selector, @rule, or :root
+    if (/^(@(import|media|font-face|keyframes|charset|layer)|:root|[.#a-zA-Z*][^{]*\{)/i.test(t)) {
+        return 'css';
+    }
+
+    // JavaScript — starts with keyword, comment, or import/export
     if (
-        /^(\/\/|\/\*|import\s|export\s|const\s|let\s|var\s|function[\s(]|class\s|async\s)/.test(t)
+        /^(\/\/|\/\*|import\s|export\s|const\s|let\s|var\s|function[\s(]|class\s|async\s|'use strict')/.test(
+            t
+        )
     ) {
         return 'javascript';
     }
+
+    // JSON — starts with { or [
     if (t[0] === '{' || t[0] === '[') return 'json';
+
     return null;
 }
 
 export function supportedLanguages() {
-    return ['json', 'javascript'];
+    return ['json', 'javascript', 'html', 'css'];
 }
 
 /**

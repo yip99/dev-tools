@@ -1,4 +1,5 @@
 /* src/app.css */
+@import 'highlight.js/styles/base16/solarized-light.css';
 
 :root {
     /* Colors */
@@ -14,15 +15,9 @@
     --accent-blue: #3b82f6;
     --accent-green: #22c55e;
 
-    /* Syntax Highlight */
-    --hl-keyword: #8b1ab5;
-    --hl-string: #297a3a;
-    --hl-number: #c45a18;
-    --hl-boolean: #7c3aed;
-    --hl-null: #8b8fa3;
-    --hl-comment: #8b8fa3;
-    --hl-attr: #1e6fb5;
-    --hl-punctuation: #6c7086;
+    /* Solarized neutral overrides (light defaults match imported theme) */
+    --hl-comment: #839496;
+    --hl-neutral: #586e75;
 
     /* Fonts */
     --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', Menlo, Consolas,
@@ -38,14 +33,8 @@
         --gray: #a1a1aa;
         --border: #333333;
 
-        --hl-keyword: #bb9af7;
-        --hl-string: #9ece6a;
-        --hl-number: #ff9e64;
-        --hl-boolean: #bb9af7;
-        --hl-null: #737aa2;
-        --hl-comment: #565f89;
-        --hl-attr: #7aa2f7;
-        --hl-punctuation: #636882;
+        --hl-comment: #657b83;
+        --hl-neutral: #93a1a1;
     }
 }
 
@@ -55,14 +44,8 @@
     --gray: #a1a1aa;
     --border: #333333;
 
-    --hl-keyword: #bb9af7;
-    --hl-string: #9ece6a;
-    --hl-number: #ff9e64;
-    --hl-boolean: #bb9af7;
-    --hl-null: #737aa2;
-    --hl-comment: #565f89;
-    --hl-attr: #7aa2f7;
-    --hl-punctuation: #636882;
+    --hl-comment: #657b83;
+    --hl-neutral: #93a1a1;
 }
 
 /* --- Resets & Base --- */
@@ -508,95 +491,30 @@ button:disabled {
     color: var(--gray);
 }
 
-/* ── highlight.js token classes ── */
+/* ── highlight.js theme overrides ───────────────────────────── */
 
-/* .hljs-keyword,
-.hljs-selector-tag,
-.hljs-built_in,
-.hljs-name,
-.hljs-tag {
-    color: var(--hl-keyword);
+/*
+ * Solarized accent colors (base08–0F) are identical in light & dark.
+ * Only neutral colors (base03, base05) need dark mode overrides.
+ * The imported solarized-light.css handles all accent token colors.
+ */
+
+/* Neutralize hljs base styles — we handle bg/fg ourselves */
+.hljs {
+    background: transparent;
+    color: inherit;
 }
 
-.hljs-string,
-.hljs-title.class_.inherited__,
-.hljs-template-variable,
-.hljs-template-tag {
-    color: var(--hl-string);
-}
-
-.hljs-number,
-.hljs-literal {
-    color: var(--hl-number);
-}
-
-.hljs-type,
-.hljs-params {
-    color: var(--hl-boolean);
-}
-
-.hljs-attr,
-.hljs-attribute,
-.hljs-property {
-    color: var(--hl-attr);
-}
-
+/* Override neutral-dependent classes with CSS variables */
 .hljs-comment,
 .hljs-doctag {
     color: var(--hl-comment);
     font-style: italic;
 }
 
-.hljs-meta,
-.hljs-meta .hljs-keyword,
-.hljs-meta .hljs-string {
-    color: var(--hl-null);
-}
-
+.hljs-tag,
+.hljs-operator,
 .hljs-punctuation,
-.hljs-section {
-    color: var(--hl-punctuation);
-}
-
-.hljs-title,
-.hljs-title.class_,
-.hljs-title.function_ {
-    color: var(--hl-attr);
-    font-weight: normal;
-}
-
-.hljs-variable,
-.hljs-variable.language_ {
-    color: var(--hl-keyword);
-}
-
-.hljs-symbol,
-.hljs-bullet {
-    color: var(--hl-number);
-}
-
 .hljs-subst {
-    color: var(--fg);
+    color: var(--hl-neutral);
 }
-
-.hljs-regexp {
-    color: var(--hl-string);
-}
-
-.hljs-addition {
-    color: var(--accent-green);
-    background: rgba(34, 197, 94, 0.1);
-}
-
-.hljs-deletion {
-    color: var(--accent-red);
-    background: rgba(239, 68, 68, 0.1);
-}
-
-.hljs-emphasis {
-    font-style: italic;
-}
-
-.hljs-strong {
-    font-weight: bold;
-} */

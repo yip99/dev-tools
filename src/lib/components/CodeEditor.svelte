@@ -31,17 +31,6 @@
 
 	const LINE_H = 20;
 
-	const TOKEN_COLORS = {
-		key: 'var(--hl-key)',
-		string: 'var(--hl-string)',
-		number: 'var(--hl-number)',
-		boolean: 'var(--hl-boolean)',
-		null: 'var(--hl-null)',
-		keyword: 'var(--hl-keyword)',
-		comment: 'var(--hl-comment)',
-		punctuation: 'var(--hl-punctuation)'
-	};
-
 	let lineCount = $derived(Math.max((value ?? '').split('\n').length, rows));
 	let lineTexts = $derived((value ?? '').split('\n'));
 	let paddedTexts = $derived([
@@ -51,8 +40,8 @@
 	let lines = $derived(Array.from({ length: lineCount }, (_, i) => i + 1));
 	let digits = $derived(Math.max(2, String(lineCount).length));
 	let hasDiff = $derived(Array.isArray(diffMarkers) && diffMarkers.length > 0);
-	let highlightTokens = $derived(language ? highlight(value ?? '', language) : null);
-	let hasSyntax = $derived(!!highlightTokens && !hasDiff);
+	let highlightedLines = $derived(language ? highlight(value ?? '', language) : null);
+	let hasSyntax = $derived(!!highlightedLines && !hasDiff);
 
 	let highlightStyle = $derived.by(() => {
 		if (activeLine < 0 || !focused || readonly || hasDiff) return null;
@@ -257,11 +246,8 @@
 					class="overlay-line"
 					style:height={wrap && lineHeights[i] ? `${lineHeights[i]}px` : null}
 				>
-					{#if highlightTokens?.[i]?.length}
-						{#each highlightTokens[i] as token}<span
-								style:color={TOKEN_COLORS[token.type]}
-								class:token-comment={token.type === 'comment'}>{token.text}</span
-							>{/each}
+					{#if highlightedLines?.[i] != null}
+						{@html highlightedLines[i] || '&nbsp;'}
 					{:else}
 						{lineTexts[i] ?? ''}
 					{/if}
@@ -424,11 +410,6 @@
 		opacity: 0.65;
 		border-radius: 2px;
 		padding: 1px 0;
-	}
-
-	/* ── Token styles ── */
-	.token-comment {
-		font-style: italic;
 	}
 
 	/* ── Gutter ── */

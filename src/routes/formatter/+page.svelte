@@ -1,16 +1,18 @@
 <!-- src/routes/formatter/+page.svelte -->
 <script>
+	import 'highlight.js/styles/base16/solarized-light.css';
 	import { untrack } from 'svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
 	import { detectLanguage } from '$lib/utils/highlight.js';
-	import { formatJavaScript, minifyJavaScript } from '$lib/utils/format.js';
+	import { formatCode, minifyCode, parseJSON, stripNulls, sortKeys } from '$lib/utils/format.js';
 
 	let input = $state('');
 	let output = $state('');
 	let error = $state(null);
 	let copyLabel = $state('Copy');
+	let formatting = $state(false);
 
 	let indentSize = $state(2);
 	let indentChar = $state('space');
@@ -28,6 +30,7 @@
 	let language = $derived(languageChoice === 'auto' ? detectedLanguage : languageChoice);
 	let isJSON = $derived(language === 'json');
 	let isJS = $derived(language === 'javascript');
+	let canFormat = $derived(isJSON || isJS);
 	let diff = $derived(computeDiff(input, output));
 
 	$effect(() => {
@@ -46,13 +49,13 @@
 		void spaceAfterColon;
 		void languageChoice;
 		untrack(() => {
-			if (input.trim() && output) applyMode();
+			if (input.trim()) applyMode();
 		});
 	});
 
-	// ── JSON utilities ──────────────────────────────────────────
+	// ── JSON-specific formatting ────────────────────────────────
 
-	function stringify(data, indent = null) {
+	function jsonStringify(data, indent = null) {
 		let result = JSON.stringify(data, null, indent);
 		if (!spaceAfterColon && indent) {
 			result = result.replace(/(^\s*"(?:[^"\\]|\\.)*"): /gm, '$1:');
@@ -60,59 +63,10 @@
 		return result;
 	}
 
-	function parseInput(text) {
-		const cleaned = text.replace(
-			/("[^"\\]*(?:\\.[^"\\]*)*")|[\u00A0\u2000-\u200A\u202F\u205F\u3000]|[\u200B-\u200F\u2060\uFEFF]|[\u2028\u2029]|[\u201C\u201D\u00AB\u00BB\u201E]|[\u2018\u2019\u201A]|[\u2013\u2014\u2212]/g,
-			(m, quoted) => {
-				if (quoted) return quoted;
-				if (/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/.test(m)) return ' ';
-				if (/[\u200B-\u200F\u2060\uFEFF]/.test(m)) return '';
-				if (/[\u2028\u2029]/.test(m)) return '\n';
-				if (/[\u201C\u201D\u00AB\u00BB\u201E]/.test(m)) return '"';
-				if (/[\u2018\u2019\u201A]/.test(m)) return "'";
-				if (/[\u2013\u2014\u2212]/.test(m)) return '-';
-				return m;
-			}
-		);
-		try {
-			return JSON.parse(cleaned);
-		} catch (e) {
-			try {
-				const fixed = cleaned
-					.replace(/'/g, '"')
-					.replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":')
-					.replace(/,\s*([}\]])/g, '$1');
-				return JSON.parse(fixed);
-			} catch {
-				throw e;
-			}
-		}
-	}
-
-	function stripNulls(obj) {
-		if (Array.isArray(obj)) return obj.map(stripNulls).filter((v) => v !== null);
-		if (typeof obj === 'object' && obj !== null) {
-			return Object.fromEntries(
-				Object.entries(obj)
-					.filter(([, v]) => v !== null)
-					.map(([k, v]) => [k, stripNulls(v)])
-			);
-		}
-		return obj;
-	}
-
-	function sortKeys(obj) {
-		if (typeof obj !== 'object' || obj === null) return obj;
-		if (Array.isArray(obj)) return obj.map(sortKeys);
-		return Object.keys(obj)
-			.sort()
-			.reduce((acc, key) => ({ ...acc, [key]: sortKeys(obj[key]) }), {});
-	}
-
 	function processJSON(transformFn) {
 		if (!input.trim()) return;
 		try {
-			let parsed = parseInput(input);
+			let parsed = parseJSON(input);
 			if (removeNulls) parsed = stripNulls(parsed);
 			output = transformFn(parsed);
 			error = null;
@@ -124,45 +78,70 @@
 
 	// ── Mode application ────────────────────────────────────────
 
-	function applyMode() {
+	async function applyMode() {
 		if (!input.trim()) return;
 
-		if (isJSON) {
-			const modes = {
-				format: () => processJSON((d) => stringify(d, indentValue)),
-				minify: () => processJSON((d) => JSON.stringify(d)),
-				sort: () => processJSON((d) => stringify(sortKeys(d), indentValue))
-			};
-			(modes[lastMode] || modes.format)();
-		} else if (isJS) {
+		if (isJSON && (lastMode === 'sort' || !spaceAfterColon || removeNulls)) {
+			// JSON with special options — use local stringify
+			if (lastMode === 'minify') {
+				processJSON((d) => JSON.stringify(d));
+			} else if (lastMode === 'sort') {
+				processJSON((d) => jsonStringify(sortKeys(d), indentValue));
+			} else {
+				processJSON((d) => jsonStringify(d, indentValue));
+			}
+			return;
+		}
+
+		if (lastMode === 'minify') {
 			try {
-				if (lastMode === 'minify') {
-					output = minifyJavaScript(input);
+				if (isJSON) {
+					output = minifyCode(JSON.stringify(parseJSON(input)), 'json');
 				} else {
-					output = formatJavaScript(input, indentValue);
+					output = minifyCode(input, language);
 				}
 				error = null;
 			} catch (e) {
-				error = 'Format error: ' + e.message;
+				error = `Minify error: ${e.message}`;
 				output = '';
 			}
-		} else {
-			output = input;
-			error = null;
+			return;
 		}
+
+		// Format via Prettier
+		if (canFormat) {
+			formatting = true;
+			try {
+				const src = isJSON ? JSON.stringify(parseJSON(input)) : input;
+				output = await formatCode(src, language, {
+					indent: indentValue,
+					indentSize
+				});
+				error = null;
+			} catch (e) {
+				error = `Format error: ${e.message}`;
+				output = '';
+			} finally {
+				formatting = false;
+			}
+			return;
+		}
+
+		output = input;
+		error = null;
 	}
 
-	function formatCode() {
+	function doFormat() {
 		lastMode = 'format';
 		applyMode();
 	}
 
-	function minifyCode() {
+	function doMinify() {
 		lastMode = 'minify';
 		applyMode();
 	}
 
-	function sortJSON() {
+	function doSort() {
 		lastMode = 'sort';
 		applyMode();
 	}
@@ -177,7 +156,7 @@
 		if (!input.trim()) return;
 		try {
 			const parsed = JSON.parse(input);
-			output = typeof parsed === 'string' ? parsed : stringify(parsed, indentValue);
+			output = typeof parsed === 'string' ? parsed : jsonStringify(parsed, indentValue);
 			error = null;
 		} catch (e) {
 			error = 'Could not unescape: ' + e.message;
@@ -211,9 +190,7 @@
 	};
 
 	function loadSample() {
-		if (languageChoice === 'auto') {
-			languageChoice = 'json';
-		}
+		if (languageChoice === 'auto') languageChoice = 'json';
 		input = SAMPLES[language] || SAMPLES.json;
 		if (!autoFormat) applyMode();
 	}
@@ -244,7 +221,7 @@
 		let keys = null;
 		if (isJSON) {
 			try {
-				keys = countKeys(parseInput(text));
+				keys = countKeys(parseJSON(text));
 			} catch {}
 		}
 		return { lines, keys, size };
@@ -278,8 +255,7 @@
 	<title
 		>{language
 			? `${language === 'javascript' ? 'JS' : language.toUpperCase()} Formatter`
-			: 'Code Formatter'}
-		- DevTools</title
+			: 'Code Formatter'} - DevTools</title
 	>
 </svelte:head>
 
@@ -296,7 +272,7 @@
 		{#if isJSON}
 			Smart-fix handles missing quotes and trailing commas automatically.
 		{:else if isJS}
-			Re-indents and cleans up JavaScript code.
+			Formats JavaScript with Prettier.
 		{:else}
 			Select a language or paste code to auto-detect.
 		{/if}
@@ -388,21 +364,23 @@
 				<button
 					class="btn-primary"
 					class:btn-active={lastMode === 'format'}
-					onclick={formatCode}
-					disabled={!input || (!isJSON && !isJS)}>Format</button
+					onclick={doFormat}
+					disabled={!input || !canFormat || formatting}
 				>
+					{formatting ? 'Formatting…' : 'Format'}
+				</button>
 				<button
 					class="btn-primary"
 					class:btn-active={lastMode === 'minify'}
-					onclick={minifyCode}
-					disabled={!input || (!isJSON && !isJS)}>Minify</button
+					onclick={doMinify}
+					disabled={!input || !canFormat || formatting}>Minify</button
 				>
 				{#if isJSON}
 					<button
 						class="btn-primary"
 						class:btn-active={lastMode === 'sort'}
-						onclick={sortJSON}
-						disabled={!input}>Sort</button
+						onclick={doSort}
+						disabled={!input || formatting}>Sort</button
 					>
 				{/if}
 			</div>

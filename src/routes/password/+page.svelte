@@ -1,6 +1,7 @@
 <!-- src/routes/password/+page.svelte -->
 <script>
 	import { browser } from '$app/environment';
+	import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 
 	const CHARSETS = {
@@ -23,6 +24,9 @@
 	let excludeChars = $state('');
 	let showCharMap = $state(false);
 
+	// UUID settings
+	let uuidVersion = $state('4');
+
 	// Individual character toggles (built from charsets minus exclusions)
 	let charToggles = $state(buildCharToggles());
 
@@ -39,14 +43,18 @@
 	);
 
 	let entropy = $derived.by(() => {
-		if (mode === 'uuid') return 122; // UUID v4 has 122 bits
+		if (mode === 'uuid') return uuidVersion === '7' ? 74 : 122;
 		const poolSize = availableChars.length;
 		if (poolSize === 0) return 0;
 		return Math.floor(length * Math.log2(poolSize));
 	});
 
 	let strength = $derived.by(() => {
-		if (mode === 'uuid') return { label: 'UUID v4', color: 'var(--accent-purple)' };
+		if (mode === 'uuid') {
+			return uuidVersion === '7'
+				? { label: 'UUID v7 (time-sorted · 74 random bits)', color: 'var(--accent-purple)' }
+				: { label: 'UUID v4', color: 'var(--accent-purple)' };
+		}
 		if (entropy === 0) return { label: 'None', color: 'var(--accent-red)' };
 		if (entropy < 40) return { label: 'Weak', color: 'var(--accent-red)' };
 		if (entropy < 60) return { label: 'Fair', color: 'var(--accent-gold)' };
@@ -59,7 +67,6 @@
 		if (mode === 'uuid') return Infinity;
 		const poolSize = availableChars.length;
 		if (poolSize === 0) return 0;
-		// Cap to avoid Infinity for large lengths
 		if (length > 52) return Infinity;
 		return Math.pow(poolSize, length);
 	});
@@ -106,11 +113,9 @@
 		charToggles[ch].enabled = !charToggles[ch].enabled;
 		charToggles = { ...charToggles };
 
-		// Update group toggle if all chars in group are off/on
 		const group = charToggles[ch].group;
 		const groupChars = Object.values(charToggles).filter((t) => t.group === group);
 		const allOff = groupChars.every((t) => !t.enabled);
-		const allOn = groupChars.every((t) => t.enabled);
 		if (group === 'lowercase') useLowercase = !allOff;
 		if (group === 'uppercase') useUppercase = !allOff;
 		if (group === 'numbers') useNumbers = !allOff;
@@ -125,7 +130,6 @@
 		const pool = availableChars;
 		if (!pool.length) return '';
 
-		// Find which groups are active (have at least 1 enabled char)
 		const activeGroups = Object.entries(CHARSETS)
 			.map(([group, chars]) => ({
 				group,
@@ -133,19 +137,16 @@
 			}))
 			.filter((g) => g.chars.length > 0);
 
-		// Not enough length to satisfy all groups
 		if (length < activeGroups.length) {
 			const arr = new Uint32Array(length);
 			crypto.getRandomValues(arr);
 			return Array.from(arr, (n) => pool[n % pool.length]).join('');
 		}
 
-		// Generate random password
 		const arr = new Uint32Array(length);
 		crypto.getRandomValues(arr);
 		const result = Array.from(arr, (n) => pool[n % pool.length]);
 
-		// Ensure at least 1 char from each active group
 		const extraRand = new Uint32Array(activeGroups.length * 2);
 		crypto.getRandomValues(extraRand);
 
@@ -155,7 +156,6 @@
 		for (const { chars } of activeGroups) {
 			const hasGroup = result.some((ch) => chars.includes(ch));
 			if (!hasGroup) {
-				// Pick a random position not already forced
 				let pos;
 				do {
 					pos = extraRand[randIdx++] % length;
@@ -166,8 +166,6 @@
 					}
 				} while (usedPositions.has(pos));
 				usedPositions.add(pos);
-
-				// Replace with a random char from the missing group
 				result[pos] = chars[extraRand[randIdx++] % chars.length];
 			}
 		}
@@ -176,13 +174,7 @@
 	}
 
 	function generateUUID() {
-		// RFC 4122 v4
-		const bytes = new Uint8Array(16);
-		crypto.getRandomValues(bytes);
-		bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
-		bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 1
-		const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-		return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+		return uuidVersion === '7' ? uuidv7() : uuidv4();
 	}
 
 	function generate() {
@@ -256,8 +248,8 @@
 	</header>
 
 	<p>
-		Generate high-entropy passwords with fine-grained character control, or UUID v4 identifiers. All
-		randomness from <code>crypto.getRandomValues</code>.
+		Generate high-entropy passwords with fine-grained character control, or UUID v4/v7 identifiers.
+		All randomness from <code>crypto.getRandomValues</code>.
 	</p>
 
 	<!-- Mode Toggle -->
@@ -280,13 +272,12 @@
 				results = [];
 			}}
 		>
-			UUID v4
+			UUID
 		</button>
 	</div>
 
-	{#if mode === 'password'}
-		<div class="settings-row">
-			<!-- Length -->
+	<div class="settings-row">
+		{#if mode === 'password'}
 			<div class="setting-item">
 				<label for="pw-length">Length</label>
 				<div class="length-control">
@@ -301,12 +292,10 @@
 					<input type="number" min="4" max="128" bind:value={length} class="length-num" />
 				</div>
 			</div>
-			<!-- Count -->
 			<div class="setting-item">
 				<label for="pw-count">Count</label>
 				<input type="number" min="1" bind:value={count} class="length-num" />
 			</div>
-			<!-- Character Groups -->
 			<div class="setting-item">
 				<label for="include-characters">Include characters</label>
 				<div>
@@ -352,7 +341,6 @@
 					</label>
 				</div>
 			</div>
-			<!-- Exclude -->
 			<div class="setting-item">
 				<label for="exclude-characters">Exclude characters</label>
 				<input
@@ -368,40 +356,61 @@
 					{showCharMap ? 'Hide' : 'Show'} character map
 				</button>
 			</div>
-		</div>
-		<!-- Character Map -->
-		{#if showCharMap}
-			<div class="charmap-section">
-				{#each Object.entries(CHARSETS) as [group, chars]}
-					<div class="charmap-group">
-						<span class="charmap-label">{group}</span>
-						<div class="charmap-grid">
-							{#each chars.split('') as ch}
-								<button
-									class="charmap-char"
-									class:charmap-off={!charToggles[ch]?.enabled}
-									onclick={() => {
-										toggleChar(ch);
-									}}
-									title={charToggles[ch]?.enabled ? `Exclude '${ch}'` : `Include '${ch}'`}
-								>
-									{ch}
-								</button>
-							{/each}
+			{#if showCharMap}
+				<div class="charmap-section">
+					{#each Object.entries(CHARSETS) as [group, chars]}
+						<div class="charmap-group">
+							<span class="charmap-label">{group}</span>
+							<div class="charmap-grid">
+								{#each chars.split('') as ch}
+									<button
+										class="charmap-char"
+										class:charmap-off={!charToggles[ch]?.enabled}
+										onclick={() => {
+											toggleChar(ch);
+										}}
+										title={charToggles[ch]?.enabled ? `Exclude '${ch}'` : `Include '${ch}'`}
+									>
+										{ch}
+									</button>
+								{/each}
+							</div>
 						</div>
-					</div>
-				{/each}
+					{/each}
+				</div>
+			{/if}
+		{:else}
+			<!-- UUID -->
+			<div class="setting-item">
+				<label for="uuid-version">Version</label>
+				<select id="uuid-version" bind:value={uuidVersion} class="length-num">
+					<option value="4">4</option>
+					<option value="7">7</option>
+				</select>
 			</div>
-		{/if}
-	{:else}
-		<!-- UUID count -->
-		<div class="settings-row">
 			<div class="setting-item">
 				<label for="uuid-count">Count</label>
 				<input type="number" min="1" bind:value={count} class="length-num" />
 			</div>
-		</div>
-	{/if}
+			<p class="uuid-desc">
+				{#if uuidVersion === '7'}
+					UUID v7 embeds a millisecond timestamp, so values sort chronologically.
+				{:else}
+					UUID v4 is fully random (122 random bits). No ordering guarantee.
+				{/if}
+			</p>
+		{/if}
+	</div>
+	<!-- Strength -->
+	<div class="strength-bar">
+		<span class="strength-label">Strength</span>
+		<span class="strength-value" style:color={strength.color}>{strength.label}</span>
+		<span class="strength-bits">{entropy} bits</span>
+		{#if mode === 'password'}
+			<span class="stats-sep">·</span>
+			<span class="strength-bits">{availableChars.length} chars in pool</span>
+		{/if}
+	</div>
 
 	{#if mode === 'password' && count > maxCombinations}
 		<AlertBox type="warn">
@@ -422,19 +431,6 @@
 			</button>
 		</div>
 	</div>
-
-	<!-- Strength -->
-	{#if results.length > 0}
-		<div class="strength-bar">
-			<span class="strength-label">Strength</span>
-			<span class="strength-value" style:color={strength.color}>{strength.label}</span>
-			<span class="strength-bits">{entropy} bits</span>
-			{#if mode === 'password'}
-				<span class="stats-sep">·</span>
-				<span class="strength-bits">{availableChars.length} chars in pool</span>
-			{/if}
-		</div>
-	{/if}
 
 	<!-- Results -->
 	{#if results.length > 0}
@@ -634,6 +630,13 @@
 		opacity: 0.5;
 	}
 
+	/* --- UUID description --- */
+	.uuid-desc {
+		font-size: 0.8rem;
+		color: var(--gray);
+		margin: 0;
+	}
+
 	/* --- Strength --- */
 	.strength-bar {
 		display: flex;
@@ -704,7 +707,6 @@
 		line-height: 1.5;
 	}
 
-	/* Colored characters in password */
 	.ch-lower {
 		color: var(--fg);
 	}

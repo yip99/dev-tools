@@ -40,15 +40,29 @@
 	let canFormat = $derived(['json', 'javascript', 'html', 'css'].includes(language));
 	let diff = $derived(computeDiff(input, output));
 
-	// ── JSON path ───────────────────────────────────────────────
+	// ── JSON path (debounced) ───────────────────────────────────
 
-	let jsonPaths = $derived.by(() => {
-		if (!isJSON || !output.trim()) return null;
-		try {
-			return computeJsonPaths(output);
-		} catch {
-			return null;
+	let jsonPaths = $state(null);
+
+	$effect(() => {
+		const json = isJSON;
+		const text = output;
+		const view = resultView;
+
+		if (!json || !text?.trim() || view !== 'formatted') {
+			jsonPaths = null;
+			return;
 		}
+
+		const timer = setTimeout(() => {
+			try {
+				jsonPaths = computeJsonPaths(text);
+			} catch {
+				jsonPaths = null;
+			}
+		}, 150);
+
+		return () => clearTimeout(timer);
 	});
 
 	let selectedPath = $derived.by(() => {

@@ -2,6 +2,7 @@
 <script>
 	import { onMount } from 'svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard.js';
 
 	const DISCORD_EPOCH = 1420070400000;
 
@@ -173,16 +174,12 @@
 		return relativeTime(result.date, nowMs);
 	});
 
+	function setCopied(key, value) {
+		copied = { ...copied, [key]: value };
+	}
+
 	async function copyValue(key, text) {
-		try {
-			await navigator.clipboard.writeText(text);
-			copied = { ...copied, [key]: true };
-			setTimeout(() => {
-				copied = { ...copied, [key]: false };
-			}, 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard(key, text, setCopied);
 	}
 </script>
 
@@ -394,13 +391,7 @@
 		color-scheme: dark;
 	}
 
-	/* --- Result Card --- */
-	.result-card {
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
+	/* --- Result Rows --- */
 	.result-row {
 		display: flex;
 		flex-direction: column;
@@ -432,21 +423,5 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.5rem;
-	}
-
-	.copy-btn {
-		background: none;
-		border: none;
-		color: var(--gray);
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		cursor: pointer;
-		text-decoration: underline;
-		padding: 0;
-		flex-shrink: 0;
-	}
-
-	.copy-btn:hover {
-		color: var(--fg);
 	}
 </style>

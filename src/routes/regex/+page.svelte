@@ -2,6 +2,7 @@
 <script>
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard.js';
 
 	let pattern = $state('');
 	let testString = $state('');
@@ -119,7 +120,6 @@
 		const template = unescapeString(extractTemplate);
 		return matches.map((m) => {
 			let output = template;
-			// Protect $$ (escaped dollar) before any substitution
 			output = output.replace(/\$\$/g, '\x00DOLLAR\x00');
 			output = output.replace(/\$&|\$0/g, m.full);
 			m.groups.forEach((g, i) => {
@@ -130,7 +130,6 @@
 					output = output.replace(new RegExp(`\\$<${name}>`, 'g'), value ?? '');
 				}
 			}
-			// Restore escaped dollars
 			output = output.replace(/\x00DOLLAR\x00/g, '$');
 			return output;
 		});
@@ -180,16 +179,12 @@
 		extractTemplate = '$0';
 	}
 
+	function setCopied(key, value) {
+		copied = { ...copied, [key]: value };
+	}
+
 	async function copyValue(key, text) {
-		try {
-			await navigator.clipboard.writeText(text);
-			copied = { ...copied, [key]: true };
-			setTimeout(() => {
-				copied = { ...copied, [key]: false };
-			}, 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard(key, text, setCopied);
 	}
 </script>
 
@@ -695,67 +690,6 @@
 		font-family: var(--font-mono);
 	}
 
-	.mode-tabs {
-		display: flex;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		overflow: hidden;
-		margin-bottom: 1.5rem;
-		width: fit-content;
-	}
-
-	.mode-tab {
-		background: transparent;
-		border: none;
-		color: var(--gray);
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		padding: 0.4rem 1rem;
-		cursor: pointer;
-		transition: all 0.15s;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-	}
-
-	.mode-tab + .mode-tab {
-		border-left: 1px solid var(--border);
-	}
-
-	.mode-tab:hover {
-		color: var(--fg);
-		background: rgba(128, 128, 128, 0.06);
-	}
-
-	.mode-tab-active {
-		color: var(--fg);
-		background: rgba(128, 128, 128, 0.08);
-		font-weight: 700;
-	}
-
-	.tab-badge {
-		font-size: 0.65rem;
-		background: var(--accent-green);
-		color: #000;
-		border-radius: 999px;
-		min-width: 1.2em;
-		padding: 0 0.35rem;
-		font-weight: 700;
-		line-height: 1;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		height: 1.15rem;
-	}
-
-	.result-card {
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
 	.match-row {
 		padding: 0.65rem 0.75rem;
 		border-bottom: 1px solid var(--border);
@@ -828,37 +762,5 @@
 		color: var(--fg);
 		font-size: 0.8rem;
 		word-break: break-all;
-	}
-
-	.copy-btn {
-		background: none;
-		border: none;
-		color: var(--gray);
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		cursor: pointer;
-		text-decoration: underline;
-		padding: 0;
-		flex-shrink: 0;
-		white-space: nowrap;
-	}
-
-	.copy-btn:hover {
-		color: var(--fg);
-	}
-
-	.hint {
-		font-size: 0.7rem;
-		color: var(--gray);
-		opacity: 0.6;
-		font-family: var(--font-mono);
-	}
-
-	code {
-		font-family: var(--font-mono);
-		font-size: 0.85em;
-		padding: 0.15em 0.35em;
-		border-radius: 3px;
-		background: rgba(128, 128, 128, 0.1);
 	}
 </style>

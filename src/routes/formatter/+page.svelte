@@ -4,6 +4,9 @@
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
+	import { computeDiffStats } from '$lib/utils/diffstats.js';
+	import { byteSize, formatSize, sizeDelta } from '$lib/utils/bytes.js';
+	import { copyToClipboard } from '$lib/utils/clipboard.js';
 	import { detectLanguage } from '$lib/utils/highlight.js';
 	import { formatCode, minifyCode, parseJSON, stripNulls, sortKeys } from '$lib/utils/format.js';
 	import { throttle } from '$lib/utils/throttle.js';
@@ -75,13 +78,9 @@
 
 	async function copyPath() {
 		if (!selectedPath) return;
-		try {
-			await navigator.clipboard.writeText(selectedPath);
-			pathCopyLabel = 'Copied!';
-			setTimeout(() => (pathCopyLabel = 'Copy'), 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard('path', selectedPath, (_, v) => {
+			pathCopyLabel = v ? 'Copied!' : 'Copy';
+		});
 	}
 
 	// ── Throttled auto-format ───────────────────────────────────
@@ -250,15 +249,11 @@
 		selectedOutputLine = -1;
 	}
 
-	async function copyToClipboard() {
+	async function copyOutput() {
 		if (!output) return;
-		try {
-			await navigator.clipboard.writeText(output);
-			copyLabel = 'Copied!';
-			setTimeout(() => (copyLabel = 'Copy'), 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard('output', output, (_, v) => {
+			copyLabel = v ? 'Copied!' : 'Copy';
+		});
 	}
 
 	const SAMPLES = {
@@ -286,67 +281,44 @@
 		return Object.keys(obj).length + Object.values(obj).reduce((sum, v) => sum + countKeys(v), 0);
 	}
 
-	function byteSize(str) {
-		return new TextEncoder().encode(str).length;
-	}
-
-	function formatSize(bytes) {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	}
-
 	function languageLabel(lang) {
 		if (!lang) return 'Code';
 		const labels = { json: 'JSON', javascript: 'JS', html: 'HTML', css: 'CSS' };
 		return labels[lang] || lang.toUpperCase();
 	}
 
-	let inputStats = $derived.by(() => {
-		const text = input || '';
-		if (!text.trim()) return null;
+	function textStats(text, checkKeys = false) {
+		if (!text?.trim()) return null;
 		const lines = text.split('\n').length;
 		const bytes = byteSize(text);
 		const size = formatSize(bytes);
 		let keys = null;
-		if (isJSON) {
+		if (checkKeys && isJSON) {
 			try {
-				keys = countKeys(parseJSON(text));
+				keys = countKeys(language === 'json' ? parseJSON(text) : JSON.parse(text));
 			} catch {}
 		}
 		return { lines, keys, size, bytes };
-	});
+	}
+
+	let inputStats = $derived(textStats(input, true));
 
 	let outputStats = $derived.by(() => {
-		const text = output || '';
-		if (!text.trim()) return null;
-		const lines = text.split('\n').length;
-		const bytes = byteSize(text);
-		const size = formatSize(bytes);
-		let keys = null;
-		if (isJSON) {
+		if (!output?.trim()) return null;
+		const stats = textStats(output, false);
+		if (stats && isJSON) {
 			try {
-				keys = countKeys(JSON.parse(text));
+				stats.keys = countKeys(JSON.parse(output));
 			} catch {}
 		}
-		return { lines, keys, size, bytes };
+		return stats;
 	});
 
-	let sizeDelta = $derived.by(() => {
-		if (!inputStats || !outputStats) return null;
-		const diff = outputStats.bytes - inputStats.bytes;
-		const pct = inputStats.bytes > 0 ? (diff / inputStats.bytes) * 100 : 0;
-		return { diff, pct, formatted: formatSize(Math.abs(diff)) };
-	});
+	let delta = $derived(
+		inputStats && outputStats ? sizeDelta(inputStats.bytes, outputStats.bytes) : null
+	);
 
-	let diffStats = $derived.by(() => {
-		if (!diff.markers || diff.markers.length === 0) return null;
-		const added = diff.markers.filter((m) => m === 'added').length;
-		const removed = diff.markers.filter((m) => m === 'removed').length;
-		const modified = diff.markers.filter((m) => m === 'modified').length;
-		const unchanged = diff.markers.filter((m) => m === null).length;
-		return { added, removed, modified, unchanged, total: diff.markers.length };
-	});
+	let diffStats = $derived(computeDiffStats(diff.markers));
 </script>
 
 <svelte:head>
@@ -507,29 +479,29 @@
 
 	<div class="input-group output-group">
 		<div class="label-row">
-			<div class="view-tabs">
+			<div class="mode-tabs">
 				<button
-					class="view-tab"
-					class:view-tab-active={resultView === 'formatted'}
+					class="mode-tab"
+					class:mode-tab-active={resultView === 'formatted'}
 					onclick={() => (resultView = 'formatted')}
 				>
 					Result
 				</button>
 				<button
-					class="view-tab"
-					class:view-tab-active={resultView === 'diff'}
+					class="mode-tab"
+					class:mode-tab-active={resultView === 'diff'}
 					onclick={() => (resultView = 'diff')}
 				>
 					Diff
 					{#if diffStats && (diffStats.added || diffStats.removed || diffStats.modified)}
-						<span class="diff-badge"
+						<span class="tab-badge tab-badge-gold"
 							>{diffStats.added + diffStats.removed + diffStats.modified}</span
 						>
 					{/if}
 				</button>
 			</div>
 			{#if output && resultView === 'formatted'}
-				<button class="text-btn" onclick={copyToClipboard}>{copyLabel}</button>
+				<button class="text-btn" onclick={copyOutput}>{copyLabel}</button>
 			{/if}
 		</div>
 
@@ -583,15 +555,15 @@
 				{/if}
 				<span class="stats-sep">·</span>
 				<span>{outputStats.size}</span>
-				{#if sizeDelta && sizeDelta.diff !== 0}
+				{#if delta}
 					<span class="stats-sep">·</span>
 					<span
 						class="size-delta"
-						class:size-smaller={sizeDelta.diff < 0}
-						class:size-larger={sizeDelta.diff > 0}
+						class:size-smaller={delta.diff < 0}
+						class:size-larger={delta.diff > 0}
 					>
-						{sizeDelta.diff > 0 ? '+' : '−'}{sizeDelta.formatted}
-						({sizeDelta.diff > 0 ? '+' : '−'}{Math.abs(sizeDelta.pct).toFixed(1)}%)
+						{delta.diff > 0 ? '+' : '−'}{delta.formatted}
+						({delta.diff > 0 ? '+' : '−'}{Math.abs(delta.pct).toFixed(1)}%)
 					</span>
 				{/if}
 			</div>
@@ -618,71 +590,8 @@
 </article>
 
 <style>
-	.view-tabs {
-		display: flex;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
-	.view-tab {
-		background: transparent;
-		border: none;
-		color: var(--gray);
-		font-family: var(--font-mono);
-		font-size: 0.8rem;
-		padding: 0.35rem 0.85rem;
-		cursor: pointer;
-		transition: all 0.15s;
-		display: inline-flex;
-		align-items: center;
-		gap: 0.4rem;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.view-tab + .view-tab {
-		border-left: 1px solid var(--border);
-	}
-
-	.view-tab:hover {
-		color: var(--fg);
-		background: rgba(128, 128, 128, 0.06);
-	}
-
-	.view-tab-active {
-		color: var(--fg);
-		background: rgba(128, 128, 128, 0.08);
-		font-weight: 700;
-	}
-
-	.diff-badge {
-		font-size: 0.65rem;
+	.tab-badge-gold {
 		background: var(--accent-gold);
-		color: #000;
-		border-radius: 999px;
-		min-width: 1.2em;
-		padding: 0 0.35rem;
-		font-weight: 700;
-		line-height: 1;
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		vertical-align: middle;
-		height: 1.15rem;
-	}
-
-	.size-delta {
-		font-weight: 700;
-		opacity: 1;
-	}
-
-	.size-smaller {
-		color: var(--accent-green);
-	}
-
-	.size-larger {
-		color: var(--accent-red);
 	}
 
 	.error-location {

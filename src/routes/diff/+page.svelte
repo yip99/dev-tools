@@ -4,6 +4,9 @@
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
+	import { computeDiffStats, hasChanges as hasChangesCheck } from '$lib/utils/diffstats.js';
+	import { byteSize, formatSize, sizeDelta } from '$lib/utils/bytes.js';
+	import { copyToClipboard } from '$lib/utils/clipboard.js';
 	import { throttle } from '$lib/utils/throttle.js';
 
 	let original = $state('');
@@ -51,40 +54,17 @@
 
 	// ── Stats ───────────────────────────────────────────────────
 
-	function byteSize(str) {
-		return new TextEncoder().encode(str).length;
-	}
-
-	function formatSize(bytes) {
-		if (bytes < 1024) return `${bytes} B`;
-		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-	}
-
 	let originalBytes = $derived(original ? byteSize(original) : 0);
 	let modifiedBytes = $derived(modified ? byteSize(modified) : 0);
-
-	let sizeDelta = $derived.by(() => {
-		if (!original.trim() || !modified.trim()) return null;
-		const d = modifiedBytes - originalBytes;
-		const pct = originalBytes > 0 ? (d / originalBytes) * 100 : 0;
-		return { diff: d, pct, formatted: formatSize(Math.abs(d)) };
-	});
-
-	let diffStats = $derived.by(() => {
-		if (!diff.markers || diff.markers.length === 0) return null;
-		const added = diff.markers.filter((m) => m === 'added').length;
-		const removed = diff.markers.filter((m) => m === 'removed').length;
-		const mod = diff.markers.filter((m) => m === 'modified').length;
-		const unchanged = diff.markers.filter((m) => m === null).length;
-		return { added, removed, modified: mod, unchanged, total: diff.markers.length };
-	});
-
-	let hasContent = $derived(original.trim() || modified.trim());
-	let hasChanges = $derived(
-		diffStats && (diffStats.added > 0 || diffStats.removed > 0 || diffStats.modified > 0)
+	let delta = $derived(
+		original.trim() && modified.trim() ? sizeDelta(originalBytes, modifiedBytes) : null
 	);
-	let identical = $derived(original.trim() && modified.trim() && !hasChanges);
+	let diffStats = $derived(computeDiffStats(diff.markers));
+	let hasContent = $derived(original.trim() || modified.trim());
+	let hasAnyChanges = $derived(hasChangesCheck(diffStats));
+	let identical = $derived(original.trim() && modified.trim() && !hasAnyChanges);
+
+	// ── Actions ─────────────────────────────────────────────────
 
 	function loadSample() {
 		original = `function greet(name) {
@@ -117,6 +97,14 @@ users.forEach((user) => greet(user));`;
 		diff = { text: '', markers: [], segments: [] };
 	}
 
+	function setCopied(key, value) {
+		if (value) {
+			copyLabel = 'Copied!';
+		} else {
+			copyLabel = 'Copy Diff';
+		}
+	}
+
 	async function copyDiff() {
 		if (!diff.text) return;
 		const lines = diff.text.split('\n');
@@ -130,13 +118,7 @@ users.forEach((user) => greet(user));`;
 			})
 			.join('\n');
 
-		try {
-			await navigator.clipboard.writeText(output);
-			copyLabel = 'Copied!';
-			setTimeout(() => (copyLabel = 'Copy Diff'), 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard('diff', output, setCopied);
 	}
 </script>
 
@@ -239,7 +221,7 @@ users.forEach((user) => greet(user));`;
 		<AlertBox type="success">Texts are identical. No differences found.</AlertBox>
 	{/if}
 
-	{#if hasChanges}
+	{#if hasAnyChanges}
 		<div class="input-group output-group">
 			<div class="label-row">
 				<label>Diff Result</label>
@@ -268,15 +250,15 @@ users.forEach((user) => greet(user));`;
 					<span>{diffStats.unchanged} unchanged</span>
 					<span class="stats-sep">·</span>
 					<span>{diffStats.total} total</span>
-					{#if sizeDelta && sizeDelta.diff !== 0}
+					{#if delta}
 						<span class="stats-sep">·</span>
 						<span
 							class="size-delta"
-							class:size-smaller={sizeDelta.diff < 0}
-							class:size-larger={sizeDelta.diff > 0}
+							class:size-smaller={delta.diff < 0}
+							class:size-larger={delta.diff > 0}
 						>
-							{sizeDelta.diff > 0 ? '+' : '−'}{sizeDelta.formatted}
-							({sizeDelta.diff > 0 ? '+' : '−'}{Math.abs(sizeDelta.pct).toFixed(1)}%)
+							{delta.diff > 0 ? '+' : '−'}{delta.formatted}
+							({delta.diff > 0 ? '+' : '−'}{Math.abs(delta.pct).toFixed(1)}%)
 						</span>
 					{/if}
 				</div>
@@ -322,19 +304,6 @@ users.forEach((user) => greet(user));`;
 
 	.stat-modified {
 		color: var(--accent-gold);
-	}
-
-	.size-delta {
-		font-weight: 700;
-		opacity: 1;
-	}
-
-	.size-smaller {
-		color: var(--accent-green);
-	}
-
-	.size-larger {
-		color: var(--accent-red);
 	}
 
 	.swap-icon {

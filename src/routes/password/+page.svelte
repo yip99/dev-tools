@@ -3,6 +3,7 @@
 	import { browser } from '$app/environment';
 	import { v4 as uuidv4, v7 as uuidv7 } from 'uuid';
 	import AlertBox from '$lib/components/AlertBox.svelte';
+	import { copyToClipboard } from '$lib/utils/clipboard.js';
 
 	const CHARSETS = {
 		lowercase: 'abcdefghijklmnopqrstuvwxyz',
@@ -101,14 +102,6 @@
 		charToggles = { ...charToggles };
 	}
 
-	function toggleGroup(group, enabled) {
-		if (group === 'lowercase') useLowercase = enabled;
-		if (group === 'uppercase') useUppercase = enabled;
-		if (group === 'numbers') useNumbers = enabled;
-		if (group === 'symbols') useSymbols = enabled;
-		syncTogglesToGroups();
-	}
-
 	function toggleChar(ch) {
 		charToggles[ch].enabled = !charToggles[ch].enabled;
 		charToggles = { ...charToggles };
@@ -120,10 +113,6 @@
 		if (group === 'uppercase') useUppercase = !allOff;
 		if (group === 'numbers') useNumbers = !allOff;
 		if (group === 'symbols') useSymbols = !allOff;
-	}
-
-	function handleExcludeInput() {
-		syncTogglesToGroups();
 	}
 
 	function generatePassword() {
@@ -202,28 +191,16 @@
 		copied = {};
 	}
 
+	function setCopied(key, value) {
+		copied = { ...copied, [key]: value };
+	}
+
 	async function copyValue(index) {
-		try {
-			await navigator.clipboard.writeText(results[index]);
-			copied = { ...copied, [index]: true };
-			setTimeout(() => {
-				copied = { ...copied, [index]: false };
-			}, 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard(index, results[index], setCopied);
 	}
 
 	async function copyAll() {
-		try {
-			await navigator.clipboard.writeText(results.join('\n'));
-			copied = { ...copied, all: true };
-			setTimeout(() => {
-				copied = { ...copied, all: false };
-			}, 2000);
-		} catch (err) {
-			console.error('Failed to copy:', err);
-		}
+		await copyToClipboard('all', results.join('\n'), setCopied);
 	}
 
 	function charClass(ch) {
@@ -300,43 +277,19 @@
 				<label for="include-characters">Include characters</label>
 				<div>
 					<label class="charset-toggle">
-						<input
-							type="checkbox"
-							bind:checked={useLowercase}
-							onchange={() => {
-								syncTogglesToGroups();
-							}}
-						/>
+						<input type="checkbox" bind:checked={useLowercase} onchange={syncTogglesToGroups} />
 						<span>a-z</span>
 					</label>
 					<label class="charset-toggle">
-						<input
-							type="checkbox"
-							bind:checked={useUppercase}
-							onchange={() => {
-								syncTogglesToGroups();
-							}}
-						/>
+						<input type="checkbox" bind:checked={useUppercase} onchange={syncTogglesToGroups} />
 						<span>A-Z</span>
 					</label>
 					<label class="charset-toggle">
-						<input
-							type="checkbox"
-							bind:checked={useNumbers}
-							onchange={() => {
-								syncTogglesToGroups();
-							}}
-						/>
+						<input type="checkbox" bind:checked={useNumbers} onchange={syncTogglesToGroups} />
 						<span>0-9</span>
 					</label>
 					<label class="charset-toggle">
-						<input
-							type="checkbox"
-							bind:checked={useSymbols}
-							onchange={() => {
-								syncTogglesToGroups();
-							}}
-						/>
+						<input type="checkbox" bind:checked={useSymbols} onchange={syncTogglesToGroups} />
 						<span>!@#$</span>
 					</label>
 				</div>
@@ -347,7 +300,7 @@
 					id="exclude-chars"
 					type="text"
 					bind:value={excludeChars}
-					oninput={handleExcludeInput}
+					oninput={syncTogglesToGroups}
 					placeholder="e.g. 0OlI1"
 				/>
 			</div>
@@ -366,9 +319,7 @@
 									<button
 										class="charmap-char"
 										class:charmap-off={!charToggles[ch]?.enabled}
-										onclick={() => {
-											toggleChar(ch);
-										}}
+										onclick={() => toggleChar(ch)}
 										title={charToggles[ch]?.enabled ? `Exclude '${ch}'` : `Include '${ch}'`}
 									>
 										{ch}
@@ -401,6 +352,7 @@
 			</p>
 		{/if}
 	</div>
+
 	<!-- Strength -->
 	<div class="strength-bar">
 		<span class="strength-label">Strength</span>
@@ -467,44 +419,6 @@
 </article>
 
 <style>
-	/* --- Mode Tabs --- */
-	.mode-tabs {
-		display: flex;
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		overflow: hidden;
-		margin-bottom: 1.5rem;
-		width: fit-content;
-	}
-
-	.mode-tab {
-		background: transparent;
-		border: none;
-		color: var(--gray);
-		font-family: var(--font-mono);
-		font-size: 0.85rem;
-		padding: 0.5rem 1.25rem;
-		cursor: pointer;
-		transition: all 0.15s;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-	}
-
-	.mode-tab + .mode-tab {
-		border-left: 1px solid var(--border);
-	}
-
-	.mode-tab:hover {
-		color: var(--fg);
-		background: rgba(128, 128, 128, 0.06);
-	}
-
-	.mode-tab-active {
-		color: var(--fg);
-		background: rgba(128, 128, 128, 0.08);
-		font-weight: 700;
-	}
-
 	/* --- Length Control --- */
 	.length-control {
 		display: flex;
@@ -529,12 +443,6 @@
 	}
 
 	/* --- Charset Toggles --- */
-	.charset-row {
-		flex-direction: column;
-		align-items: flex-start;
-		gap: 0.75rem;
-	}
-
 	.charset-toggles {
 		display: flex;
 		gap: 0.5rem;
@@ -664,12 +572,6 @@
 	}
 
 	/* --- Results --- */
-	.result-card {
-		border: 1px solid var(--border);
-		border-radius: 6px;
-		overflow: hidden;
-	}
-
 	.result-row {
 		display: flex;
 		align-items: center;
@@ -721,30 +623,5 @@
 
 	.ch-sym {
 		color: var(--accent-red);
-	}
-
-	.copy-btn {
-		background: none;
-		border: none;
-		color: var(--gray);
-		font-family: var(--font-mono);
-		font-size: 0.7rem;
-		cursor: pointer;
-		text-decoration: underline;
-		padding: 0;
-		flex-shrink: 0;
-		white-space: nowrap;
-	}
-
-	.copy-btn:hover {
-		color: var(--fg);
-	}
-
-	code {
-		font-family: var(--font-mono);
-		font-size: 0.85em;
-		padding: 0.15em 0.35em;
-		border-radius: 3px;
-		background: rgba(128, 128, 128, 0.1);
 	}
 </style>

@@ -1,42 +1,25 @@
-# sv
+# dev-tools
 
-Everything you need to build a Svelte project, powered by [`sv`](https://github.com/sveltejs/cli).
+A collection of stateless, client-side developer utilities. No data leaves your browser.
 
-## Creating a project
+## Tools
 
-If you're seeing this, you've probably already done this step. Congrats!
+### Epoch Converter
 
-```sh
-# create a new project
-npx sv create my-app
-```
+Convert between Unix timestamps and human-readable dates. Auto-detects seconds, milliseconds, and Discord snowflakes. Live clock with one-click capture.
 
-To recreate this project with the same configuration:
+### Code Formatter
 
-```sh
-# recreate this project
-npx sv create --template minimal --no-types --add prettier eslint --install npm ./
-```
+Format, validate, and syntax-highlight JSON, JavaScript, HTML, and CSS. Features include minification, key sorting, JSON path inspection, and inline diff view.
 
-## Developing
+### Text Comparison
 
-Once you've created a project and installed dependencies with `npm install` (or `pnpm install` or `yarn`), start a development server:
+Side-by-side text diff with line-level and character-level highlighting. Shows additions, deletions, and modifications with summary statistics.
 
-```sh
-npm run dev
+### Password & UUID Generator
 
-# or start the server and open the app in a new browser tab
-npm run dev -- --open
-```
+Generate cryptographically secure passwords with fine-grained character control, or UUID v4/v7 identifiers. All randomness from `crypto.getRandomValues`.
 
-## Building
+### Regex Builder
 
-To create a production version of your app:
-
-```sh
-npm run build
-```
-
-You can preview the production build with `npm run preview`.
-
-> To deploy your app, you may need to install an [adapter](https://svelte.dev/docs/kit/adapters) for your target environment.
+Build and test regular expressions with live match highlighting. Supports replace mode with capture group substitution and extract mode with custom templates.

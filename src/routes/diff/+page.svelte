@@ -1,8 +1,10 @@
 <!-- src/routes/diff/+page.svelte -->
 <script>
+	import { onDestroy } from 'svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
+	import { throttle } from '$lib/utils/throttle.js';
 
 	let original = $state('');
 	let modified = $state('');
@@ -11,6 +13,8 @@
 	let wrapLines = $state(false);
 	let trimWhitespace = $state(false);
 	let ignoreCase = $state(false);
+
+	let diff = $state({ text: '', markers: [], segments: [] });
 
 	function prepare(text) {
 		let result = text;
@@ -26,8 +30,45 @@
 		return result;
 	}
 
-	let diff = $derived.by(() => {
-		return computeDiff(prepare(original), prepare(modified));
+	// ── Throttled diff computation ──────────────────────────────
+
+	const throttledDiff = throttle((a, b) => {
+		diff = computeDiff(a, b);
+	}, 150);
+
+	onDestroy(() => throttledDiff.cancel());
+
+	$effect(() => {
+		const a = prepare(original);
+		const b = prepare(modified);
+		if (!a && !b) {
+			throttledDiff.cancel();
+			diff = { text: '', markers: [], segments: [] };
+		} else {
+			throttledDiff(a, b);
+		}
+	});
+
+	// ── Stats ───────────────────────────────────────────────────
+
+	function byteSize(str) {
+		return new TextEncoder().encode(str).length;
+	}
+
+	function formatSize(bytes) {
+		if (bytes < 1024) return `${bytes} B`;
+		if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+		return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+	}
+
+	let originalBytes = $derived(original ? byteSize(original) : 0);
+	let modifiedBytes = $derived(modified ? byteSize(modified) : 0);
+
+	let sizeDelta = $derived.by(() => {
+		if (!original.trim() || !modified.trim()) return null;
+		const d = modifiedBytes - originalBytes;
+		const pct = originalBytes > 0 ? (d / originalBytes) * 100 : 0;
+		return { diff: d, pct, formatted: formatSize(Math.abs(d)) };
 	});
 
 	let diffStats = $derived.by(() => {
@@ -70,8 +111,10 @@ users.forEach((user) => greet(user));`;
 	}
 
 	function clear() {
+		throttledDiff.cancel();
 		original = '';
 		modified = '';
+		diff = { text: '', markers: [], segments: [] };
 	}
 
 	async function copyDiff() {
@@ -163,6 +206,8 @@ users.forEach((user) => greet(user));`;
 					<span>{original.split('\n').length} lines</span>
 					<span class="stats-sep">·</span>
 					<span>{original.length} chars</span>
+					<span class="stats-sep">·</span>
+					<span>{formatSize(originalBytes)}</span>
 				</div>
 			{/if}
 		</div>
@@ -183,6 +228,8 @@ users.forEach((user) => greet(user));`;
 					<span>{modified.split('\n').length} lines</span>
 					<span class="stats-sep">·</span>
 					<span>{modified.length} chars</span>
+					<span class="stats-sep">·</span>
+					<span>{formatSize(modifiedBytes)}</span>
 				</div>
 			{/if}
 		</div>
@@ -221,6 +268,17 @@ users.forEach((user) => greet(user));`;
 					<span>{diffStats.unchanged} unchanged</span>
 					<span class="stats-sep">·</span>
 					<span>{diffStats.total} total</span>
+					{#if sizeDelta && sizeDelta.diff !== 0}
+						<span class="stats-sep">·</span>
+						<span
+							class="size-delta"
+							class:size-smaller={sizeDelta.diff < 0}
+							class:size-larger={sizeDelta.diff > 0}
+						>
+							{sizeDelta.diff > 0 ? '+' : '−'}{sizeDelta.formatted}
+							({sizeDelta.diff > 0 ? '+' : '−'}{Math.abs(sizeDelta.pct).toFixed(1)}%)
+						</span>
+					{/if}
 				</div>
 			{/if}
 		</div>
@@ -232,7 +290,6 @@ users.forEach((user) => greet(user));`;
 </article>
 
 <style>
-	/* --- Diff Input Panes --- */
 	.diff-inputs {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
@@ -250,7 +307,6 @@ users.forEach((user) => greet(user));`;
 		margin-bottom: 0;
 	}
 
-	/* --- Diff Stats --- */
 	.diff-stats {
 		opacity: 1;
 		flex-wrap: wrap;
@@ -268,7 +324,19 @@ users.forEach((user) => greet(user));`;
 		color: var(--accent-gold);
 	}
 
-	/* --- Swap Icon --- */
+	.size-delta {
+		font-weight: 700;
+		opacity: 1;
+	}
+
+	.size-smaller {
+		color: var(--accent-green);
+	}
+
+	.size-larger {
+		color: var(--accent-red);
+	}
+
 	.swap-icon {
 		font-size: 1rem;
 		line-height: 1;

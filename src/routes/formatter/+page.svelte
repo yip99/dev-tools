@@ -1,17 +1,23 @@
 <!-- src/routes/formatter/+page.svelte -->
 <script>
-	import { untrack } from 'svelte';
+	import { untrack, onDestroy } from 'svelte';
 	import AlertBox from '$lib/components/AlertBox.svelte';
 	import CodeEditor from '$lib/components/CodeEditor.svelte';
 	import { computeDiff } from '$lib/utils/diff.js';
 	import { detectLanguage } from '$lib/utils/highlight.js';
 	import { formatCode, minifyCode, parseJSON, stripNulls, sortKeys } from '$lib/utils/format.js';
+	import { throttle } from '$lib/utils/throttle.js';
+	import { parseErrorLine } from '$lib/utils/errors.js';
+	import { computeJsonPaths, getValueType } from '$lib/utils/jsonpath.js';
 
 	let input = $state('');
 	let output = $state('');
 	let error = $state(null);
+	let errorLine = $state(-1);
 	let copyLabel = $state('Copy');
+	let pathCopyLabel = $state('Copy');
 	let formatting = $state(false);
+	let selectedOutputLine = $state(-1);
 
 	let indentSize = $state(2);
 	let indentChar = $state('space');
@@ -31,14 +37,71 @@
 	let canFormat = $derived(['json', 'javascript', 'html', 'css'].includes(language));
 	let diff = $derived(computeDiff(input, output));
 
+	// ── JSON path ───────────────────────────────────────────────
+
+	let jsonPaths = $derived.by(() => {
+		if (!isJSON || !output.trim()) return null;
+		try {
+			return computeJsonPaths(output);
+		} catch {
+			return null;
+		}
+	});
+
+	let selectedPath = $derived.by(() => {
+		if (!jsonPaths || selectedOutputLine < 0 || selectedOutputLine >= jsonPaths.length) {
+			return null;
+		}
+		return jsonPaths[selectedOutputLine];
+	});
+
+	let selectedValueType = $derived.by(() => {
+		if (selectedOutputLine < 0 || !output) return null;
+		const lines = output.split('\n');
+		if (selectedOutputLine >= lines.length) return null;
+		return getValueType(lines[selectedOutputLine]);
+	});
+
+	// Clear selection when output changes
+	$effect(() => {
+		void output;
+		selectedOutputLine = -1;
+	});
+
+	function handleOutputLineClick(line) {
+		selectedOutputLine = selectedOutputLine === line ? -1 : line;
+		pathCopyLabel = 'Copy';
+	}
+
+	async function copyPath() {
+		if (!selectedPath) return;
+		try {
+			await navigator.clipboard.writeText(selectedPath);
+			pathCopyLabel = 'Copied!';
+			setTimeout(() => (pathCopyLabel = 'Copy'), 2000);
+		} catch (err) {
+			console.error('Failed to copy:', err);
+		}
+	}
+
+	// ── Throttled auto-format ───────────────────────────────────
+
+	const throttledApply = throttle(() => applyMode(), 300);
+
+	onDestroy(() => throttledApply.cancel());
+
 	$effect(() => {
 		if (!autoFormat) return;
-		if (input.trim()) {
-			untrack(() => applyMode());
-		} else {
-			output = '';
-			error = null;
-		}
+		const hasInput = input.trim();
+		untrack(() => {
+			if (hasInput) {
+				throttledApply();
+			} else {
+				throttledApply.cancel();
+				output = '';
+				clearError();
+			}
+		});
 	});
 
 	$effect(() => {
@@ -47,9 +110,21 @@
 		void spaceAfterColon;
 		void languageChoice;
 		untrack(() => {
-			if (input.trim()) applyMode();
+			if (input.trim()) throttledApply();
 		});
 	});
+
+	// ── Error handling ──────────────────────────────────────────
+
+	function setError(message) {
+		error = message;
+		errorLine = parseErrorLine(message, input);
+	}
+
+	function clearError() {
+		error = null;
+		errorLine = -1;
+	}
 
 	// ── JSON-specific formatting ────────────────────────────────
 
@@ -67,9 +142,9 @@
 			let parsed = parseJSON(input);
 			if (removeNulls) parsed = stripNulls(parsed);
 			output = transformFn(parsed);
-			error = null;
+			clearError();
 		} catch (e) {
-			error = 'Invalid JSON: ' + e.message;
+			setError('Invalid JSON: ' + e.message);
 			output = '';
 		}
 	}
@@ -79,7 +154,6 @@
 	async function applyMode() {
 		if (!input.trim()) return;
 
-		// JSON with special options — use local stringify
 		if (isJSON && (lastMode === 'sort' || !spaceAfterColon || removeNulls)) {
 			if (lastMode === 'minify') {
 				processJSON((d) => JSON.stringify(d));
@@ -91,7 +165,6 @@
 			return;
 		}
 
-		// Minify (sync)
 		if (lastMode === 'minify') {
 			try {
 				if (isJSON) {
@@ -99,15 +172,14 @@
 				} else {
 					output = minifyCode(input, language);
 				}
-				error = null;
+				clearError();
 			} catch (e) {
-				error = `Minify error: ${e.message}`;
+				setError(`Minify error: ${e.message}`);
 				output = '';
 			}
 			return;
 		}
 
-		// Format via Prettier (async)
 		if (canFormat) {
 			formatting = true;
 			try {
@@ -116,9 +188,9 @@
 					indent: indentValue,
 					indentSize
 				});
-				error = null;
+				clearError();
 			} catch (e) {
-				error = `Format error: ${e.message}`;
+				setError(`Format error: ${e.message}`);
 				output = '';
 			} finally {
 				formatting = false;
@@ -127,38 +199,43 @@
 		}
 
 		output = input;
-		error = null;
+		clearError();
 	}
 
 	function doFormat() {
 		lastMode = 'format';
+		throttledApply.cancel();
 		applyMode();
 	}
 
 	function doMinify() {
 		lastMode = 'minify';
+		throttledApply.cancel();
 		applyMode();
 	}
 
 	function doSort() {
 		lastMode = 'sort';
+		throttledApply.cancel();
 		applyMode();
 	}
 
 	function escapeJSON() {
 		if (!input.trim()) return;
+		throttledApply.cancel();
 		output = JSON.stringify(input);
-		error = null;
+		clearError();
 	}
 
 	function unescapeJSON() {
 		if (!input.trim()) return;
+		throttledApply.cancel();
 		try {
 			const parsed = JSON.parse(input);
 			output = typeof parsed === 'string' ? parsed : jsonStringify(parsed, indentValue);
-			error = null;
+			clearError();
 		} catch (e) {
-			error = 'Could not unescape: ' + e.message;
+			setError('Could not unescape: ' + e.message);
 			output = '';
 		}
 	}
@@ -166,9 +243,11 @@
 	// ── UI utilities ────────────────────────────────────────────
 
 	function clear() {
+		throttledApply.cancel();
 		input = '';
 		output = '';
-		error = null;
+		clearError();
+		selectedOutputLine = -1;
 	}
 
 	async function copyToClipboard() {
@@ -193,7 +272,10 @@
 	function loadSample() {
 		if (languageChoice === 'auto') languageChoice = 'json';
 		input = SAMPLES[language] || SAMPLES.json;
-		if (!autoFormat) applyMode();
+		if (!autoFormat) {
+			throttledApply.cancel();
+			applyMode();
+		}
 	}
 
 	// ── Stats ───────────────────────────────────────────────────
@@ -224,28 +306,37 @@
 		const text = input || '';
 		if (!text.trim()) return null;
 		const lines = text.split('\n').length;
-		const size = formatSize(byteSize(text));
+		const bytes = byteSize(text);
+		const size = formatSize(bytes);
 		let keys = null;
 		if (isJSON) {
 			try {
 				keys = countKeys(parseJSON(text));
 			} catch {}
 		}
-		return { lines, keys, size };
+		return { lines, keys, size, bytes };
 	});
 
 	let outputStats = $derived.by(() => {
 		const text = output || '';
 		if (!text.trim()) return null;
 		const lines = text.split('\n').length;
-		const size = formatSize(byteSize(text));
+		const bytes = byteSize(text);
+		const size = formatSize(bytes);
 		let keys = null;
 		if (isJSON) {
 			try {
 				keys = countKeys(JSON.parse(text));
 			} catch {}
 		}
-		return { lines, keys, size };
+		return { lines, keys, size, bytes };
+	});
+
+	let sizeDelta = $derived.by(() => {
+		if (!inputStats || !outputStats) return null;
+		const diff = outputStats.bytes - inputStats.bytes;
+		const pct = inputStats.bytes > 0 ? (diff / inputStats.bytes) * 100 : 0;
+		return { diff, pct, formatted: formatSize(Math.abs(diff)) };
 	});
 
 	let diffStats = $derived.by(() => {
@@ -272,7 +363,8 @@
 
 	<p>
 		{#if isJSON}
-			Format JSON with smart-fix for missing quotes and trailing commas.
+			Format JSON with smart-fix for missing quotes and trailing commas. Click a line in the output
+			to see its JSON path.
 		{:else if language === 'javascript'}
 			Format JavaScript with Prettier. Re-indents and cleans up code.
 		{:else if language === 'html'}
@@ -350,6 +442,8 @@
 			rows={8}
 			wrap={wrapLines}
 			{language}
+			error={!!error}
+			{errorLine}
 		/>
 		{#if inputStats}
 			<div class="stats-bar">
@@ -403,7 +497,12 @@
 	</div>
 
 	{#if error}
-		<AlertBox type="error">{error}</AlertBox>
+		<AlertBox type="error">
+			{error}
+			{#if errorLine >= 0}
+				<span class="error-location">Line {errorLine + 1}</span>
+			{/if}
+		</AlertBox>
 	{/if}
 
 	<div class="input-group output-group">
@@ -441,9 +540,10 @@
 				readonly
 				placeholder="Result will appear here..."
 				rows={8}
-				error={!!error}
 				wrap={wrapLines}
 				{language}
+				onLineClick={isJSON && jsonPaths ? handleOutputLineClick : undefined}
+				selectedLine={isJSON ? selectedOutputLine : -1}
 			/>
 		{:else}
 			<CodeEditor
@@ -456,6 +556,24 @@
 			/>
 		{/if}
 
+		{#if isJSON && jsonPaths && output}
+			<div class="path-bar" class:path-bar-active={selectedPath}>
+				<span class="path-label">Path</span>
+				{#if selectedPath}
+					<code class="path-value">{selectedPath}</code>
+					{#if selectedValueType}
+						<span class="path-type">{selectedValueType}</span>
+					{/if}
+					<button class="path-copy" onclick={copyPath}>{pathCopyLabel}</button>
+					<button class="path-dismiss" onclick={() => (selectedOutputLine = -1)} title="Dismiss"
+						>×</button
+					>
+				{:else}
+					<span class="path-hint">Click a line to inspect its path</span>
+				{/if}
+			</div>
+		{/if}
+
 		{#if outputStats}
 			<div class="stats-bar">
 				<span>{outputStats.lines} lines</span>
@@ -465,6 +583,17 @@
 				{/if}
 				<span class="stats-sep">·</span>
 				<span>{outputStats.size}</span>
+				{#if sizeDelta && sizeDelta.diff !== 0}
+					<span class="stats-sep">·</span>
+					<span
+						class="size-delta"
+						class:size-smaller={sizeDelta.diff < 0}
+						class:size-larger={sizeDelta.diff > 0}
+					>
+						{sizeDelta.diff > 0 ? '+' : '−'}{sizeDelta.formatted}
+						({sizeDelta.diff > 0 ? '+' : '−'}{Math.abs(sizeDelta.pct).toFixed(1)}%)
+					</span>
+				{/if}
 			</div>
 		{/if}
 
@@ -541,5 +670,129 @@
 		justify-content: center;
 		vertical-align: middle;
 		height: 1.15rem;
+	}
+
+	.size-delta {
+		font-weight: 700;
+		opacity: 1;
+	}
+
+	.size-smaller {
+		color: var(--accent-green);
+	}
+
+	.size-larger {
+		color: var(--accent-red);
+	}
+
+	.error-location {
+		display: inline-block;
+		margin-left: 0.5rem;
+		padding: 0.1rem 0.4rem;
+		font-size: 0.75rem;
+		font-weight: 700;
+		background: rgba(255, 77, 77, 0.15);
+		border-radius: 3px;
+		color: var(--accent-red);
+	}
+
+	/* ── JSON path bar ── */
+	.path-bar {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.4rem 0.75rem;
+		margin-top: 0.35rem;
+		border: 1px solid var(--border);
+		border-radius: 6px;
+		background: rgba(128, 128, 128, 0.03);
+		font-size: 0.8rem;
+		min-height: 2.25rem;
+		box-sizing: border-box;
+		transition:
+			border-color 0.2s,
+			background 0.2s;
+	}
+
+	.path-bar-active {
+		border-color: var(--accent-blue);
+		background: rgba(59, 130, 246, 0.05);
+	}
+
+	.path-label {
+		font-size: 0.65rem;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		color: var(--gray);
+		font-weight: 700;
+		flex-shrink: 0;
+		transition: color 0.2s;
+	}
+
+	.path-bar-active .path-label {
+		color: var(--accent-blue);
+	}
+
+	.path-hint {
+		color: var(--gray);
+		opacity: 0.5;
+		font-size: 0.75rem;
+		font-style: italic;
+	}
+
+	.path-value {
+		font-family: var(--font-mono);
+		font-size: 0.8rem;
+		color: var(--fg);
+		word-break: break-all;
+		flex: 1;
+		min-width: 0;
+		background: none;
+		padding: 0;
+	}
+
+	.path-type {
+		font-size: 0.65rem;
+		color: var(--gray);
+		opacity: 0.7;
+		flex-shrink: 0;
+		padding: 0.1rem 0.35rem;
+		border-radius: 3px;
+		background: rgba(128, 128, 128, 0.08);
+	}
+
+	.path-copy {
+		background: none;
+		border: none;
+		color: var(--accent-blue);
+		font-family: var(--font-mono);
+		font-size: 0.7rem;
+		cursor: pointer;
+		text-decoration: underline;
+		padding: 0;
+		flex-shrink: 0;
+		white-space: nowrap;
+	}
+
+	.path-copy:hover {
+		opacity: 0.7;
+	}
+
+	.path-dismiss {
+		background: none;
+		border: none;
+		color: var(--gray);
+		font-size: 1rem;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0 0.15rem;
+		flex-shrink: 0;
+		opacity: 0.5;
+		transition: opacity 0.15s;
+	}
+
+	.path-dismiss:hover {
+		opacity: 1;
+		color: var(--fg);
 	}
 </style>

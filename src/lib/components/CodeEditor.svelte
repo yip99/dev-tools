@@ -10,8 +10,11 @@
 		placeholder = '',
 		rows = 8,
 		error = false,
+		errorLine = -1,
 		wrap = false,
 		language = null,
+		selectedLine = -1,
+		onLineClick = undefined,
 		diffMarkers = undefined,
 		diffSegments = undefined
 	} = $props();
@@ -42,24 +45,52 @@
 	let hasDiff = $derived(Array.isArray(diffMarkers) && diffMarkers.length > 0);
 	let highlightedLines = $derived(language ? highlight(value ?? '', language) : null);
 	let hasSyntax = $derived(!!highlightedLines && !hasDiff);
+	let hasErrorLine = $derived(errorLine >= 0 && errorLine < lineCount);
+	let hasSelectedLine = $derived(selectedLine >= 0 && selectedLine < lineCount);
+	let isClickable = $derived(!!onLineClick);
 
-	let highlightStyle = $derived.by(() => {
-		if (activeLine < 0 || !focused || readonly || hasDiff) return null;
-
+	function computeLineStyle(line, scrollOffset) {
 		let top = 0;
 		let height = LINE_H;
 
-		if (wrap && lineHeights.length > activeLine) {
-			for (let i = 0; i < activeLine; i++) {
+		if (wrap && lineHeights.length > line) {
+			for (let i = 0; i < line; i++) {
 				top += lineHeights[i] || LINE_H;
 			}
-			height = lineHeights[activeLine] || LINE_H;
+			height = lineHeights[line] || LINE_H;
 		} else {
-			top = activeLine * LINE_H;
+			top = line * LINE_H;
 		}
 
-		top -= scrollTop;
+		top -= scrollOffset;
 		return `top:calc(var(--pad-y) + ${top}px);height:${height}px`;
+	}
+
+	let activeLineStyle = $derived.by(() => {
+		if (activeLine < 0 || !focused || readonly || hasDiff) return null;
+		return computeLineStyle(activeLine, scrollTop);
+	});
+
+	let errorLineStyle = $derived.by(() => {
+		if (!hasErrorLine) return null;
+		return computeLineStyle(errorLine, scrollTop);
+	});
+
+	let selectedLineStyle = $derived.by(() => {
+		if (!hasSelectedLine) return null;
+		return computeLineStyle(selectedLine, scrollTop);
+	});
+
+	// Scroll error line into view
+	$effect(() => {
+		if (!hasErrorLine || !textareaEl) return;
+		const targetTop = errorLine * LINE_H;
+		const viewTop = textareaEl.scrollTop;
+		const viewHeight = textareaEl.clientHeight;
+		if (targetTop < viewTop || targetTop + LINE_H > viewTop + viewHeight) {
+			textareaEl.scrollTop = Math.max(0, targetTop - viewHeight / 3);
+			syncScroll();
+		}
 	});
 
 	$effect(() => {
@@ -120,6 +151,34 @@
 		activeLine = -1;
 	}
 
+	function handleTextareaClick(e) {
+		if (!onLineClick || !textareaEl) return;
+		const rect = textareaEl.getBoundingClientRect();
+		const padTop = parseFloat(getComputedStyle(textareaEl).paddingTop) || 0;
+		const y = e.clientY - rect.top - padTop + textareaEl.scrollTop;
+
+		let line;
+		if (wrap && lineHeights.length > 0) {
+			let cumulative = 0;
+			line = lineHeights.length - 1;
+			for (let i = 0; i < lineHeights.length; i++) {
+				cumulative += lineHeights[i] || LINE_H;
+				if (y < cumulative) {
+					line = i;
+					break;
+				}
+			}
+		} else {
+			line = Math.floor(y / LINE_H);
+		}
+
+		onLineClick(Math.max(0, Math.min(line, lineCount - 1)));
+	}
+
+	function handleGutterLineClick(line) {
+		onLineClick?.(line);
+	}
+
 	function syncScroll() {
 		if (!textareaEl) return;
 		const top = textareaEl.scrollTop;
@@ -176,6 +235,7 @@
 	class:is-wrap={wrap}
 	class:is-diff={hasDiff}
 	class:is-syntax={hasSyntax}
+	class:is-clickable={isClickable}
 	style:--digits={digits}
 >
 	{#if hasDiff}
@@ -197,8 +257,16 @@
 		</div>
 	{/if}
 
-	{#if highlightStyle}
-		<div class="line-highlight" style={highlightStyle}></div>
+	{#if activeLineStyle}
+		<div class="line-highlight" style={activeLineStyle}></div>
+	{/if}
+
+	{#if errorLineStyle}
+		<div class="error-line-highlight" style={errorLineStyle}></div>
+	{/if}
+
+	{#if selectedLineStyle}
+		<div class="selected-line-highlight" style={selectedLineStyle}></div>
 	{/if}
 
 	{#if hasDiff}
@@ -261,10 +329,15 @@
 			<div
 				class="ln"
 				class:ln-active={focused && !readonly && activeLine === i}
+				class:ln-error={hasErrorLine && errorLine === i}
+				class:ln-selected={hasSelectedLine && selectedLine === i}
 				class:ln-diff-added={diffAt(i) === 'added'}
 				class:ln-diff-removed={diffAt(i) === 'removed'}
 				class:ln-diff-modified={diffAt(i) === 'modified'}
 				style:height={wrap && lineHeights[i] ? `${lineHeights[i]}px` : null}
+				onclick={isClickable ? () => handleGutterLineClick(i) : undefined}
+				role={isClickable ? 'button' : undefined}
+				tabindex={isClickable ? -1 : undefined}
 			>
 				{n}
 			</div>
@@ -290,6 +363,7 @@
 		onkeydown={handleKeydown}
 		onkeyup={updateActiveLine}
 		onmouseup={updateActiveLine}
+		onclick={handleTextareaClick}
 		onfocus={handleFocus}
 		onblur={handleBlur}
 		oninput={updateActiveLine}
@@ -329,6 +403,28 @@
 		left: 0;
 		right: 0;
 		background: rgba(128, 128, 128, 0.07);
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	/* ── Error line highlight ── */
+	.error-line-highlight {
+		position: absolute;
+		left: 0;
+		right: 0;
+		background: rgba(255, 77, 77, 0.12);
+		border-left: 3px solid var(--accent-red);
+		pointer-events: none;
+		z-index: 0;
+	}
+
+	/* ── Selected line highlight ── */
+	.selected-line-highlight {
+		position: absolute;
+		left: 0;
+		right: 0;
+		background: rgba(59, 130, 246, 0.08);
+		border-left: 3px solid var(--accent-blue);
 		pointer-events: none;
 		z-index: 0;
 	}
@@ -428,6 +524,10 @@
 		z-index: 3;
 	}
 
+	.is-clickable .gutter {
+		pointer-events: auto;
+	}
+
 	.is-diff .gutter {
 		background-image: linear-gradient(rgba(128, 128, 128, 0.02), rgba(128, 128, 128, 0.02));
 	}
@@ -444,9 +544,30 @@
 			color 0.15s;
 	}
 
+	.is-clickable .ln {
+		cursor: pointer;
+	}
+
+	.is-clickable .ln:hover {
+		opacity: 1;
+		color: var(--accent-blue);
+	}
+
 	.ln-active {
 		opacity: 1;
 		color: var(--fg);
+	}
+
+	.ln-error {
+		opacity: 1;
+		color: var(--accent-red);
+		font-weight: 700;
+	}
+
+	.ln-selected {
+		opacity: 1;
+		color: var(--accent-blue);
+		font-weight: 700;
 	}
 
 	.ln-diff-added {
@@ -530,6 +651,10 @@
 		background: rgba(128, 128, 128, 0.25);
 	}
 
+	.is-clickable textarea {
+		cursor: pointer;
+	}
+
 	textarea:focus {
 		outline: none;
 	}
@@ -543,6 +668,10 @@
 	.is-readonly textarea {
 		background: rgba(128, 128, 128, 0.03);
 		cursor: default;
+	}
+
+	.is-readonly.is-clickable textarea {
+		cursor: pointer;
 	}
 
 	.is-readonly .gutter {

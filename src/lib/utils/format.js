@@ -9,7 +9,6 @@ import * as prettierCss from 'prettier/plugins/postcss';
 const PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss];
 
 const PARSERS = {
-    json: 'json5',
     javascript: 'babel',
     html: 'html',
     css: 'css'
@@ -19,11 +18,9 @@ const PARSERS = {
 
 /**
  * Format code using Prettier.
- * JSON uses the json5 parser which accepts comments, unquoted keys,
- * single quotes, trailing commas, etc.
  *
  * @param {string} code
- * @param {string} language - 'json' | 'javascript' | 'html' | 'css'
+ * @param {string} language - 'javascript' | 'html' | 'css'
  * @param {object} [options]
  * @param {string} [options.indent]
  * @param {number} [options.indentSize]
@@ -32,9 +29,8 @@ const PARSERS = {
 export async function formatCode(code, language, options = {}) {
     if (!code?.trim()) return '';
 
-    const source = language === 'json' ? cleanUnicode(code) : code;
     const parser = PARSERS[language];
-    if (!parser) return source;
+    if (!parser) return code;
 
     const indent = options.indent ?? '  ';
     const tabWidth = indent[0] === '\t' ? (options.indentSize ?? 2) : indent.length;
@@ -73,7 +69,7 @@ export async function formatCode(code, language, options = {}) {
         });
     }
 
-    const result = await prettier.format(source, prettierOptions);
+    const result = await prettier.format(code, prettierOptions);
     return result.replace(/\n$/, '');
 }
 

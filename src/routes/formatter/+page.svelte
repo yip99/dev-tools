@@ -8,7 +8,14 @@
 	import { byteSize, formatSize, sizeDelta } from '$lib/utils/bytes.js';
 	import { copyToClipboard } from '$lib/utils/clipboard.js';
 	import { detectLanguage } from '$lib/utils/highlight.js';
-	import { formatCode, minifyCode, parseJSON, stripNulls, sortKeys } from '$lib/utils/format.js';
+	import {
+		formatCode,
+		minifyCode,
+		parseJSON,
+		stripColonSpaces,
+		stripNulls,
+		sortKeys
+	} from '$lib/utils/format.js';
 	import { throttle } from '$lib/utils/throttle.js';
 	import { parseErrorLine } from '$lib/utils/errors.js';
 	import { computeJsonPaths, getValueType } from '$lib/utils/jsonpath.js';
@@ -39,6 +46,7 @@
 	let isJSON = $derived(language === 'json');
 	let canFormat = $derived(['json', 'javascript', 'html', 'css'].includes(language));
 	let diff = $derived(computeDiff(input, output));
+	let formatOptions = $derived({ indent: indentValue, indentSize });
 
 	// ── JSON path (debounced) ───────────────────────────────────
 
@@ -79,7 +87,6 @@
 		return getValueType(lines[selectedOutputLine]);
 	});
 
-	// Clear selection when output changes
 	$effect(() => {
 		void output;
 		selectedOutputLine = -1;
@@ -139,16 +146,21 @@
 		errorLine = -1;
 	}
 
-	// ── JSON-specific formatting ────────────────────────────────
+	// ── JSON transforms ─────────────────────────────────────────
 
 	function jsonStringify(data, indent = null) {
 		let result = JSON.stringify(data, null, indent);
 		if (!spaceAfterColon && indent) {
-			result = result.replace(/(^\s*"(?:[^"\\]|\\.)*"): /gm, '$1:');
+			result = stripColonSpaces(result);
 		}
 		return result;
 	}
 
+	/**
+	 * Parse input → transform → output. Sync.
+	 * parseJSON accepts messy input (comments, unquoted keys, etc.)
+	 * JSON.stringify guarantees strict output.
+	 */
 	function processJSON(transformFn) {
 		if (!input.trim()) return;
 		try {
@@ -167,7 +179,7 @@
 	async function applyMode() {
 		if (!input.trim()) return;
 
-		if (isJSON && (lastMode === 'sort' || !spaceAfterColon || removeNulls)) {
+		if (isJSON) {
 			if (lastMode === 'minify') {
 				processJSON((d) => JSON.stringify(d));
 			} else if (lastMode === 'sort') {
@@ -180,11 +192,7 @@
 
 		if (lastMode === 'minify') {
 			try {
-				if (isJSON) {
-					output = minifyCode(JSON.stringify(parseJSON(input)), 'json');
-				} else {
-					output = minifyCode(input, language);
-				}
+				output = minifyCode(input, language);
 				clearError();
 			} catch (e) {
 				setError(`Minify error: ${e.message}`);
@@ -196,11 +204,7 @@
 		if (canFormat) {
 			formatting = true;
 			try {
-				const src = isJSON ? JSON.stringify(parseJSON(input)) : input;
-				output = await formatCode(src, language, {
-					indent: indentValue,
-					indentSize
-				});
+				output = await formatCode(input, language, formatOptions);
 				clearError();
 			} catch (e) {
 				setError(`Format error: ${e.message}`);
@@ -271,7 +275,17 @@
 	}
 
 	const SAMPLES = {
-		json: '{ id: 1, name: "DevTool User", active: true, score: 42.5, empty: null, tags: ["admin", "dev"], list: [1, 2, ], }',
+		json: `{
+  // User profile (JSON5 input)
+  id: 1,
+  name: 'DevTool User',
+  active: true,
+  score: 42.5,
+  empty: null,
+  tags: ["admin", "dev"],
+  /* trailing comma below */
+  list: [1, 2, 3,],
+}`,
 		javascript:
 			'// User service\nconst getUser=async(id)=>{const res=await fetch(`/api/users/${id}`);if(!res.ok){throw new Error("Not found")}const data=await res.json();return{id:data.id,name:data.name,active:true,tags:["admin","dev"]}};',
 		html: '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Hello</title><link rel="stylesheet" href="style.css"></head><body><div class="container"><h1>Hello World</h1><p>This is a <strong>test</strong> paragraph.</p><ul><li>Item 1</li><li>Item 2</li><li>Item 3</li></ul></div><script src="app.js"><\/script></body></html>',
@@ -301,32 +315,22 @@
 		return labels[lang] || lang.toUpperCase();
 	}
 
-	function textStats(text, checkKeys = false) {
+	function textStats(text) {
 		if (!text?.trim()) return null;
 		const lines = text.split('\n').length;
 		const bytes = byteSize(text);
 		const size = formatSize(bytes);
 		let keys = null;
-		if (checkKeys && isJSON) {
+		if (isJSON) {
 			try {
-				keys = countKeys(language === 'json' ? parseJSON(text) : JSON.parse(text));
+				keys = countKeys(JSON.parse(text));
 			} catch {}
 		}
 		return { lines, keys, size, bytes };
 	}
 
-	let inputStats = $derived(textStats(input, true));
-
-	let outputStats = $derived.by(() => {
-		if (!output?.trim()) return null;
-		const stats = textStats(output, false);
-		if (stats && isJSON) {
-			try {
-				stats.keys = countKeys(JSON.parse(output));
-			} catch {}
-		}
-		return stats;
-	});
+	let inputStats = $derived(textStats(input));
+	let outputStats = $derived(textStats(output));
 
 	let delta = $derived(
 		inputStats && outputStats ? sizeDelta(inputStats.bytes, outputStats.bytes) : null
@@ -349,8 +353,8 @@
 
 	<p>
 		{#if isJSON}
-			Format JSON with smart-fix for missing quotes and trailing commas. Click a line in the output
-			to see its JSON path.
+			Accepts JSON5 input — comments, unquoted keys, single quotes, trailing commas. Always outputs
+			valid standard JSON. Click a line to see its path.
 		{:else if language === 'javascript'}
 			Format JavaScript with Prettier. Re-indents and cleans up code.
 		{:else if language === 'html'}
@@ -619,7 +623,6 @@
 		color: var(--accent-red);
 	}
 
-	/* ── JSON path bar ── */
 	.path-bar {
 		display: flex;
 		align-items: center;

@@ -9,7 +9,7 @@ import * as prettierCss from 'prettier/plugins/postcss';
 const PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss];
 
 const PARSERS = {
-    json: 'json',
+    json: 'json5',
     javascript: 'babel',
     html: 'html',
     css: 'css'
@@ -19,6 +19,9 @@ const PARSERS = {
 
 /**
  * Format code using Prettier.
+ * JSON uses the json5 parser which accepts comments, unquoted keys,
+ * single quotes, trailing commas, etc.
+ *
  * @param {string} code
  * @param {string} language - 'json' | 'javascript' | 'html' | 'css'
  * @param {object} [options]
@@ -29,8 +32,9 @@ const PARSERS = {
 export async function formatCode(code, language, options = {}) {
     if (!code?.trim()) return '';
 
+    const source = language === 'json' ? cleanUnicode(code) : code;
     const parser = PARSERS[language];
-    if (!parser) return code;
+    if (!parser) return source;
 
     const indent = options.indent ?? '  ';
     const tabWidth = indent[0] === '\t' ? (options.indentSize ?? 2) : indent.length;
@@ -69,11 +73,194 @@ export async function formatCode(code, language, options = {}) {
         });
     }
 
-    const result = await prettier.format(code, prettierOptions);
+    const result = await prettier.format(source, prettierOptions);
     return result.replace(/\n$/, '');
 }
 
-// ── Minification ────────────────────────────────────────────────
+// ── JSON parsing (sync — tokenizer-based) ───────────────────────
+
+/**
+ * Parse potentially messy JSON into a JS object. Synchronous.
+ * Tries strict JSON.parse first. Falls back to normalizeJSON
+ * tokenizer which strips comments, converts single quotes,
+ * quotes unquoted keys, and removes trailing commas.
+ *
+ * @param {string} text
+ * @returns {any}
+ */
+export function parseJSON(text) {
+    const cleaned = cleanUnicode(text);
+    try {
+        return JSON.parse(cleaned);
+    } catch (firstError) {
+        try {
+            return JSON.parse(normalizeJSON(cleaned));
+        } catch {
+            throw firstError;
+        }
+    }
+}
+
+/**
+ * Single-pass tokenizer that converts messy JSON5-ish text to strict JSON.
+ * Handles: // and /* comments, 'single quotes', unquoted keys, trailing commas.
+ * Properly skips string contents so it never corrupts values.
+ *
+ * @param {string} text
+ * @returns {string} strict JSON string
+ */
+function normalizeJSON(text) {
+    let out = '';
+    let i = 0;
+    const len = text.length;
+    let lastSignificant = '';
+
+    while (i < len) {
+        const ch = text[i];
+
+        // Whitespace — pass through, don't update lastSignificant
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
+            out += ch;
+            i++;
+            continue;
+        }
+
+        // Line comment — skip to end of line
+        if (ch === '/' && i + 1 < len && text[i + 1] === '/') {
+            i += 2;
+            while (i < len && text[i] !== '\n') i++;
+            continue;
+        }
+
+        // Block comment — skip to closing */
+        if (ch === '/' && i + 1 < len && text[i + 1] === '*') {
+            i += 2;
+            while (i < len && !(text[i] === '*' && i + 1 < len && text[i + 1] === '/')) i++;
+            if (i < len) i += 2;
+            continue;
+        }
+
+        // Double-quoted string — pass through unchanged
+        if (ch === '"') {
+            let j = i + 1;
+            while (j < len) {
+                if (text[j] === '\\') { j += 2; continue; }
+                if (text[j] === '"') break;
+                j++;
+            }
+            out += text.slice(i, j + 1);
+            lastSignificant = '"';
+            i = j + 1;
+            continue;
+        }
+
+        // Single-quoted string — convert to double-quoted
+        if (ch === "'") {
+            let j = i + 1;
+            let inner = '';
+            while (j < len && text[j] !== "'") {
+                if (text[j] === '\\') {
+                    if (j + 1 < len && text[j + 1] === "'") {
+                        // \' → unescaped ' (not a valid JSON escape)
+                        inner += "'";
+                    } else {
+                        inner += text.slice(j, j + 2);
+                    }
+                    j += 2;
+                    continue;
+                }
+                // Escape double quotes that appear inside
+                if (text[j] === '"') {
+                    inner += '\\"';
+                } else {
+                    inner += text[j];
+                }
+                j++;
+            }
+            out += '"' + inner + '"';
+            lastSignificant = '"';
+            i = j + 1;
+            continue;
+        }
+
+        // Trailing comma — skip if next meaningful token is } or ]
+        if (ch === ',') {
+            if (isTrailingComma(text, i, len)) {
+                i++;
+                continue;
+            }
+            out += ch;
+            lastSignificant = ch;
+            i++;
+            continue;
+        }
+
+        // Unquoted key — identifier in key position (after { or ,)
+        if (isIdentStart(ch) && (lastSignificant === '{' || lastSignificant === ',')) {
+            let j = i;
+            while (j < len && isIdentChar(text[j])) j++;
+            // Look ahead past whitespace for a colon
+            let k = j;
+            while (k < len && (text[k] === ' ' || text[k] === '\t' || text[k] === '\n' || text[k] === '\r')) k++;
+            if (k < len && text[k] === ':') {
+                out += '"' + text.slice(i, j) + '"';
+                lastSignificant = '"';
+                i = j;
+                continue;
+            }
+        }
+
+        out += ch;
+        lastSignificant = ch;
+        i++;
+    }
+
+    return out;
+}
+
+/**
+ * Check if comma at position is trailing (followed only by
+ * whitespace/comments, then } or ]).
+ */
+function isTrailingComma(text, pos, len) {
+    let j = pos + 1;
+    while (j < len) {
+        const ch = text[j];
+        if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') { j++; continue; }
+        if (ch === '/' && j + 1 < len && text[j + 1] === '/') {
+            j += 2;
+            while (j < len && text[j] !== '\n') j++;
+            continue;
+        }
+        if (ch === '/' && j + 1 < len && text[j + 1] === '*') {
+            j += 2;
+            while (j < len && !(text[j] === '*' && j + 1 < len && text[j + 1] === '/')) j++;
+            if (j < len) j += 2;
+            continue;
+        }
+        return ch === '}' || ch === ']';
+    }
+    return false;
+}
+
+function isIdentStart(ch) {
+    return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_' || ch === '$';
+}
+
+function isIdentChar(ch) {
+    return isIdentStart(ch) || (ch >= '0' && ch <= '9');
+}
+
+/**
+ * Remove spaces after colons in formatted JSON.
+ * @param {string} json
+ * @returns {string}
+ */
+export function stripColonSpaces(json) {
+    return json.replace(/(^\s*"(?:[^"\\]|\\.)*"): /gm, '$1:');
+}
+
+// ── Minification (sync) ────────────────────────────────────────
 
 /**
  * Minify code. Synchronous.
@@ -98,14 +285,12 @@ function minifyJS(code) {
     while (i < len) {
         const ch = code[i];
 
-        // Single-line comment
         if (ch === '/' && i + 1 < len && code[i + 1] === '/') {
             i += 2;
             while (i < len && code[i] !== '\n') i++;
             continue;
         }
 
-        // Multi-line comment
         if (ch === '/' && i + 1 < len && code[i + 1] === '*') {
             i += 2;
             while (i < len && !(code[i] === '*' && i + 1 < len && code[i + 1] === '/')) i++;
@@ -113,7 +298,6 @@ function minifyJS(code) {
             continue;
         }
 
-        // String (single/double quote)
         if (ch === '"' || ch === "'") {
             const q = ch;
             out += ch;
@@ -126,7 +310,6 @@ function minifyJS(code) {
             continue;
         }
 
-        // Template literal
         if (ch === '`') {
             out += ch;
             i++;
@@ -152,7 +335,6 @@ function minifyJS(code) {
             continue;
         }
 
-        // Regex literal
         if (ch === '/' && canStartRegex(out)) {
             out += ch;
             i++;
@@ -167,7 +349,6 @@ function minifyJS(code) {
             continue;
         }
 
-        // Whitespace
         if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
             i++;
             while (
@@ -194,7 +375,6 @@ function minifyCSS(code) {
     while (i < len) {
         const ch = code[i];
 
-        // Comments
         if (ch === '/' && i + 1 < len && code[i + 1] === '*') {
             i += 2;
             while (i < len && !(code[i] === '*' && i + 1 < len && code[i + 1] === '/')) i++;
@@ -202,7 +382,6 @@ function minifyCSS(code) {
             continue;
         }
 
-        // Strings
         if (ch === '"' || ch === "'") {
             const q = ch;
             out += ch;
@@ -215,7 +394,6 @@ function minifyCSS(code) {
             continue;
         }
 
-        // Whitespace
         if (ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r') {
             i++;
             while (
@@ -223,7 +401,6 @@ function minifyCSS(code) {
                 (code[i] === ' ' || code[i] === '\t' || code[i] === '\n' || code[i] === '\r')
             )
                 i++;
-            // Space needed between identifier-like chars, after colon in declarations
             const last = out[out.length - 1];
             const next = i < len ? code[i] : '';
             if (last && next && !':;{},>+~)('.includes(last) && !':;{},>+~)('.includes(next)) {
@@ -232,12 +409,10 @@ function minifyCSS(code) {
             continue;
         }
 
-        // Collapse semicolon before closing brace
         if (ch === ';' && i + 1 < len) {
             let j = i + 1;
             while (j < len && (code[j] === ' ' || code[j] === '\t' || code[j] === '\n' || code[j] === '\r')) j++;
             if (j < len && code[j] === '}') {
-                // Skip the semicolon
                 i++;
                 continue;
             }
@@ -252,11 +427,8 @@ function minifyCSS(code) {
 
 function minifyHTML(code) {
     return code
-        // Remove HTML comments (but not conditional comments)
         .replace(/<!--(?!\[)[\s\S]*?-->/g, '')
-        // Collapse whitespace between tags
         .replace(/>\s+</g, '><')
-        // Collapse internal whitespace runs
         .replace(/\s{2,}/g, ' ')
         .trim();
 }
@@ -276,17 +448,13 @@ function canStartRegex(output) {
     return '=(:;,!&|?{[+->~%^*/'.includes(last);
 }
 
-// ── JSON utilities ──────────────────────────────────────────────
+// ── Unicode cleanup ─────────────────────────────────────────────
 
-/**
- * Parse potentially messy JSON.
- * Handles trailing commas, unquoted keys, smart quotes, unicode spaces.
- */
-export function parseJSON(text) {
-    const cleaned = text.replace(
-        /("[^"\\]*(?:\\.[^"\\]*)*")|[\u00A0\u2000-\u200A\u202F\u205F\u3000]|[\u200B-\u200F\u2060\uFEFF]|[\u2028\u2029]|[\u201C\u201D\u00AB\u00BB\u201E]|[\u2018\u2019\u201A]|[\u2013\u2014\u2212]/g,
-        (m, quoted) => {
-            if (quoted) return quoted;
+function cleanUnicode(text) {
+    return text.replace(
+        /("[^"\\]*(?:\\.[^"\\]*)*")|('[^'\\]*(?:\\.[^'\\]*)*')|[\u00A0\u2000-\u200A\u202F\u205F\u3000]|[\u200B-\u200F\u2060\uFEFF]|[\u2028\u2029]|[\u201C\u201D\u00AB\u00BB\u201E]|[\u2018\u2019\u201A]|[\u2013\u2014\u2212]/g,
+        (m, dblQuoted, sglQuoted) => {
+            if (dblQuoted || sglQuoted) return m;
             if (/[\u00A0\u2000-\u200A\u202F\u205F\u3000]/.test(m)) return ' ';
             if (/[\u200B-\u200F\u2060\uFEFF]/.test(m)) return '';
             if (/[\u2028\u2029]/.test(m)) return '\n';
@@ -296,20 +464,9 @@ export function parseJSON(text) {
             return m;
         }
     );
-    try {
-        return JSON.parse(cleaned);
-    } catch (e) {
-        try {
-            const fixed = cleaned
-                .replace(/'/g, '"')
-                .replace(/([{,]\s*)([a-zA-Z0-9_]+?)\s*:/g, '$1"$2":')
-                .replace(/,\s*([}\]])/g, '$1');
-            return JSON.parse(fixed);
-        } catch {
-            throw e;
-        }
-    }
 }
+
+// ── JSON object utilities ───────────────────────────────────────
 
 export function stripNulls(obj) {
     if (Array.isArray(obj)) return obj.map(stripNulls).filter((v) => v !== null);

@@ -61,6 +61,15 @@
 				<h3>Regex Builder</h3>
 				<p>Test patterns against strings. Live matches and capture groups highlighted.</p>
 			</a>
+
+			<a href="/crop" class="tool-card">
+				<div class="tool-header">
+					<span class="tool-icon accent-blue">▧</span>
+					<span class="tool-arrow">→</span>
+				</div>
+				<h3>Image Cropper</h3>
+				<p>Crop, resize, download, or copy images. Your files stay in your browser.</p>
+			</a>
 		</div>
 
 		<div class="calibrating-box" style="margin-top: 3rem;">More modules compiling...</div>

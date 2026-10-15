@@ -592,7 +592,6 @@
 			ondragleave={() => (isDraggingOver = false)}
 			ondrop={handleDrop}
 		>
-			<div class="drop-icon" aria-hidden="true">↥</div>
 			<h2>Drop an image here</h2>
 			<p>or browse your files, or paste an image from your clipboard</p>
 			<button class="btn-secondary" onclick={() => fileInput?.click()}>Choose image</button>
@@ -894,13 +893,6 @@
 	.drop-zone.drop-active {
 		border-color: var(--accent-gold);
 		background: rgba(251, 191, 36, 0.07);
-	}
-
-	.drop-icon {
-		font-size: 2.5rem;
-		color: var(--accent-gold);
-		line-height: 1;
-		margin-bottom: 0.75rem;
 	}
 
 	.drop-zone h2 {
